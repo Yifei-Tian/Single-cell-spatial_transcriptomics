@@ -1,3 +1,36 @@
+"""
+================================================================================
+模块名称: preprocessing.py
+功能概述: 数据预处理与 Cell2location 反卷积核心函数库
+================================================================================
+
+【模块说明】
+    本模块封装了单细胞转录组（scRNA-seq）和空间转录组（Visium）数据预处理的
+    核心函数，以及 Cell2location 两阶段建模的完整流程。
+    所有函数均通过 run_preprocessing.py 主脚本调用。
+
+【函数索引】
+    数据加载：
+      check_cell2location_available()     - 导入并返回 Cell2location 模型类
+      load_scrna_h5ad()                   - 加载 scRNA-seq .h5ad，基础质控
+      load_visium()                       - 加载 Visium 空间数据，完整质控流程
+
+    预处理：
+      align_shared_genes()               - 对齐 scRNA 与 Visium 的共享基因
+      subset_t_cells()                   - 提取 T/NK 细胞亚群
+      assign_treg_label()                - 将指定 T/NK 簇重注释为 Treg
+
+    Cell2location 建模：
+      setup_and_train_regression_model() - 训练 RegressionModel（参考签名学习）
+      export_signatures()                - 导出 RegressionModel 后验签名
+      extract_cell_state_df()            - 提取细胞类型参考签名矩阵
+      sanitize_cell_state_df()           - 清理签名矩阵中的无效值
+
+    后处理：
+      _strip_abundance_prefix()          - 去除 cell2location 列名前缀
+      compute_spot_cell_proportion()     - 将后验丰度转换为细胞比例表
+================================================================================
+"""
 from time import perf_counter
 from typing import cast
 
@@ -8,41 +41,72 @@ import scanpy as sc
 import squidpy as sq
 
 
-def check_cell2location_available():
-    """导入 cell2location 模型类。"""
-    from cell2location.models import Cell2location, RegressionModel
+# ============================================================
+# Cell2location 模型导入
+# ============================================================
 
+def check_cell2location_available():
+    """
+    导入并返回 Cell2location 两阶段模型类。
+
+    返回
+    ----
+    (RegressionModel, Cell2location) — 参考签名学习模型类和空间建模模型类。
+
+    注意
+    ----
+    如果 cell2location 包未安装，将抛出 ImportError。
+    建议在环境配置阶段运行 `pip install cell2location` 确保安装。
+    """
+    from cell2location.models import Cell2location, RegressionModel
     return RegressionModel, Cell2location
 
 
+# ============================================================
+# 数据加载函数
+# ============================================================
+
 def load_scrna_h5ad(path, t0=None):
-    """读取 scRNA 的 h5ad 并进行基础质控过滤。"""
+    """
+    加载 scRNA-seq .h5ad 文件并执行基础质控过滤。
+
+    质控标准（参考 Luecken & Theis, Mol Syst Biol, 2019）：
+      - 保留总表达量 > 200 的细胞（过低可能为空液滴或碎片）；
+      - 保留总表达量 > 10 的基因（过低为噪声信号）。
+
+    参数
+    ----
+    path : str 或 Path，.h5ad 文件路径
+    t0   : 计时起始时间戳（perf_counter），用于日志记录
+
+    返回
+    ----
+    ad.AnnData，质控后的 scRNA-seq 数据对象。
+    """
     if t0 is None:
         t0 = perf_counter()
 
-    print(f"-> Loading directly from h5ad: {path} ...")
+    print(f"-> Loading scRNA-seq from h5ad: {path} ...")
     adata_sc = ad.read_h5ad(path)
+    print(f"<- Loaded in {perf_counter() - t0:.2f}s | Shape: {adata_sc.shape}")
 
-    print(f"<- Loaded AnnData in {perf_counter() - t0:.2f}s")
-    print(f"AnnData shape: {adata_sc.shape}")
-    # 以上读入并输出必要信息
-
+    # 处理行索引：若 obs 中有 "Cell" 列，将其设为行索引
     obs = cast(pd.DataFrame, adata_sc.obs).copy()
     if "Cell" in obs.columns:
-        obs = obs.set_index("Cell") # 将 Cell 列设置为行索引
+        obs = obs.set_index("Cell")
     adata_sc.obs = obs
 
-    adata_sc.var["SYMBOL"] = adata_sc.var_names # 将 var_names 复制到 SYMBOL 列，方便后续使用
-    # gene_id 列不是Ensembl ID命名方式
+    # 将 var_names 备份至 "SYMBOL" 列，便于后续基因名引用
+    adata_sc.var["SYMBOL"] = adata_sc.var_names
 
-    gene_filter = np.array(adata_sc.X.sum(axis=0)).flatten() > 10 # 按列求和，只保留总表达量>10的基因
+    # 质控过滤
+    gene_filter = np.array(adata_sc.X.sum(axis=0)).flatten() > 10
     adata_sc = adata_sc[:, gene_filter]
-    cell_filter = np.array(adata_sc.X.sum(axis=1)).flatten() > 200 # 按行求和，只保留总表达量>200的细胞
+    cell_filter = np.array(adata_sc.X.sum(axis=1)).flatten() > 200
     adata_sc = adata_sc[cell_filter, :]
+    print(f"After QC filtering: {adata_sc.shape}")
 
-    print("After filtering:")
-    print(adata_sc.shape) # 输出筛选后的 AnnData 维度
-
+    # 输出细胞类型统计
     celltype_counts = (
         adata_sc.obs["celltype"]
         .astype("string")
@@ -51,36 +115,53 @@ def load_scrna_h5ad(path, t0=None):
         .rename_axis("celltype")
         .reset_index(name="count")
     )
-    print("celltype 统计结果:")
-    print(celltype_counts)
+    print("Cell type counts:\n", celltype_counts.to_string(index=False))
 
     return adata_sc
 
 
-def load_visium(path, sample_name="slice"):
-    """读取 Visium 空间数据并完成质控、归一化和聚类。"""
-    adata_vis = sq.read.visium(path, load_images=True)
-    print(adata_vis)
+def load_visium(path, sample_name: str = "slice"):
+    """
+    加载 10x Genomics Visium 空间转录组数据，执行完整质控、归一化和聚类。
 
-    adata_vis.var_names_make_unique() # 确保基因名唯一，避免后续分析出错
-    adata_vis.var["mt"] = adata_vis.var_names.str.startswith("MT-") # 标记线粒体基因
-    sc.pp.calculate_qc_metrics(adata_vis, qc_vars=["mt"], inplace=True) # 在 data_vis 新增三列：total_counts、n_genes_by_counts、pct_counts_mt
-    print(adata_vis.var["mt"].value_counts()) # 输出线粒体基因数量统计
+    质控标准（参考 Williams et al., Genome Medicine, 2022）：
+      - 保留总 UMI 计数在 5,000–35,000 之间的 spot；
+      - 过滤线粒体基因比例超过 20% 的 spot（提示细胞损伤）；
+      - 仅保留在至少 10 个 spot 中表达的基因。
+
+    参数
+    ----
+    path        : str 或 Path，Space Ranger 输出目录路径
+    sample_name : 切片名称标签（写入 adata.obs["slice"]）
+
+    返回
+    ----
+    ad.AnnData，质控并完成归一化/聚类的 Visium 数据对象。
+    """
+    adata_vis = sq.read.visium(path, load_images=True)
+    print(f"Loaded Visium [{sample_name}]: {adata_vis.shape}")
+
+    adata_vis.var_names_make_unique()
+    adata_vis.var["mt"] = adata_vis.var_names.str.startswith("MT-")
+    sc.pp.calculate_qc_metrics(adata_vis, qc_vars=["mt"], inplace=True)
+    print("MT gene count:", adata_vis.var["mt"].sum())
 
     adata_vis.obs["slice"] = sample_name
-    
-    # 筛选空间数据：总表达量在 5000-35000 之间，线粒体基因比例 < 20%，基因至少在 10 个位置表达
+
+    # 质控过滤
     sc.pp.filter_cells(adata_vis, min_counts=5000)
     sc.pp.filter_cells(adata_vis, max_counts=35000)
     adata_vis = adata_vis[adata_vis.obs["pct_counts_mt"] < 20].copy()
     sc.pp.filter_genes(adata_vis, min_cells=10)
+    print(f"After QC filtering [{sample_name}]: {adata_vis.shape}")
 
-    adata_vis.layers["counts"] = adata_vis.X.copy() # 将原始表达矩阵存在一个单独的count矩阵层中
+    # 保存原始 count 层（Cell2location 需要原始 count 作为输入）
+    adata_vis.layers["counts"] = adata_vis.X.copy()
 
-    sc.pp.normalize_total(adata_vis, inplace=True) # 归一化
-    sc.pp.log1p(adata_vis) # 对数转换
+    # 归一化与降维（用于质控可视化和探索性分析）
+    sc.pp.normalize_total(adata_vis, inplace=True)
+    sc.pp.log1p(adata_vis)
     sc.pp.highly_variable_genes(adata_vis, flavor="seurat", n_top_genes=2000)
-
     sc.pp.pca(adata_vis)
     sc.pp.neighbors(adata_vis)
     sc.tl.umap(adata_vis)
@@ -89,36 +170,100 @@ def load_visium(path, sample_name="slice"):
     return adata_vis
 
 
+# ============================================================
+# 预处理函数
+# ============================================================
+
 def align_shared_genes(adata_sc, adata_vis):
-    """对齐 scRNA 与空间数据的基因，并返回对齐后的拷贝。"""
+    """
+    对齐 scRNA-seq 与 Visium 数据集的共享基因，返回对齐后的副本。
+
+    Cell2location 要求 scRNA 和 Visium 数据使用相同的基因集。
+    取两个数据集 var_names 的交集，确保基因维度一致。
+
+    参数
+    ----
+    adata_sc  : scRNA-seq AnnData
+    adata_vis : Visium AnnData
+
+    返回
+    ----
+    (shared_genes, adata_sc_aligned, adata_vis_aligned) — 三元组：
+      shared_genes      : 共享基因列表（pd.Index）；
+      adata_sc_aligned  : 只含共享基因的 scRNA AnnData；
+      adata_vis_aligned : 只含共享基因的 Visium AnnData。
+    """
     shared_genes = adata_sc.var_names.intersection(adata_vis.var_names)
-    adata_sc = adata_sc[:, shared_genes].copy()
-    adata_vis_sh = adata_vis[:, shared_genes].copy()
-    return shared_genes, adata_sc, adata_vis_sh
+    print(f"Shared genes: {len(shared_genes)}")
+    adata_sc_aligned  = adata_sc[:, shared_genes].copy()
+    adata_vis_aligned = adata_vis[:, shared_genes].copy()
+    return shared_genes, adata_sc_aligned, adata_vis_aligned
 
 
-def subset_t_cells(adata_sc, celltype_col="celltype", cluster_col="res.3"):
-    """筛选 T/NK 细胞并将聚类标签转为类别型便于绘图。"""
+def subset_t_cells(adata_sc, celltype_col: str = "celltype", cluster_col: str = "res.3"):
+    """
+    从 scRNA-seq 数据中提取 T/NK 细胞亚群，并将聚类标签转为 category 类型。
+
+    参数
+    ----
+    adata_sc    : scRNA-seq AnnData
+    celltype_col: 细胞类型注释列名
+    cluster_col : 聚类结果列名（用于 Treg 亚群鉴定）
+
+    返回
+    ----
+    ad.AnnData，只含 T/NK 细胞的子集。
+    """
     adata_t = adata_sc[adata_sc.obs[celltype_col] == "T/NK"].copy()
-    adata_t.obs[cluster_col] = adata_t.obs[cluster_col].astype(str).astype("category") # 将 adata_t 的 res.3 列转换为字符串类型再转换为类别型
+    # 将聚类标签转为 category 类型，确保 scanpy 绘图函数正确识别分类变量
+    adata_t.obs[cluster_col] = (
+        adata_t.obs[cluster_col].astype(str).astype("category")
+    )
     return adata_t
 
 
 def assign_treg_label(
     adata_sc,
-    celltype_col="celltype",
-    cluster_col="res.3",
-    treg_clusters=("9", "9.0"),
-    output_col="final_celltype",
+    celltype_col: str = "celltype",
+    cluster_col: str = "res.3",
+    treg_clusters: tuple[str, ...] = ("9", "9.0"),
+    output_col: str = "final_celltype",
 ):
-    """在新注释列中将指定 T/NK 簇重命名为 Treg。"""
-    adata_sc.obs[output_col] = adata_sc.obs[celltype_col].astype(str) # 把celltype列复制到final_celltype列
+    """
+    在新注释列中将指定 T/NK 亚聚类重命名为 Treg。
+
+    鉴定依据（参考 Sakaguchi et al., Annual Review of Immunology, 2020）：
+      该方法遵循基于标志基因的细胞类型注释经典范式：
+      CD3D + CD4 为 T 细胞谱系标志；
+      FOXP3 为 Treg 主转录因子；
+      IL2RA（CD25）为 Treg 表面标志物。
+      通过气泡图确认 res.3 第 9 簇具备上述表达特征后，将其重注释为 Treg。
+
+    参数
+    ----
+    adata_sc     : scRNA-seq AnnData
+    celltype_col : 原始细胞类型注释列名
+    cluster_col  : 聚类列名
+    treg_clusters: 对应 Treg 的聚类编号（兼容字符串和浮点格式）
+    output_col   : 新注释列名
+
+    返回
+    ----
+    ad.AnnData，新增 output_col 列，Treg 细胞已重新标注。
+    """
+    adata_sc.obs[output_col] = adata_sc.obs[celltype_col].astype(str)
     treg_mask = (adata_sc.obs[celltype_col] == "T/NK") & (
         adata_sc.obs[cluster_col].astype(str).isin(treg_clusters)
     )
-    adata_sc.obs.loc[treg_mask, output_col] = "Treg" # 将final_celltype列选择出来的细胞标记为 Treg
+    adata_sc.obs.loc[treg_mask, output_col] = "Treg"
+    n_treg = int(treg_mask.sum())
+    print(f"Treg cells annotated: {n_treg}")
     return adata_sc
 
+
+# ============================================================
+# Cell2location 建模函数
+# ============================================================
 
 def setup_and_train_regression_model(
     adata_sc,
@@ -130,83 +275,100 @@ def setup_and_train_regression_model(
     early_stopping_min_delta: float = 1e-4,
 ):
     """
-    从 scRNA 数据中估算参考细胞类型签名（RegressionModel）。
+    训练 Cell2location RegressionModel，从 scRNA-seq 数据中学习细胞类型参考签名。
+
+    模型说明（参考 Kleshchevnikov et al., Nature Biotechnology, 2022）
+    ---------------------------------------------------------------
+    RegressionModel 是 Cell2location 的第一阶段模型，通过变分推断学习
+    每种细胞类型（final_celltype）在各基因上的平均表达分布参数，
+    输出用于第二阶段空间建模的参考签名矩阵（cell_state_df）。
+
+    训练参数选择
+    -----------
+    - max_epochs=250    : 官方推荐 200–300 epochs，确保模型充分收敛；
+    - batch_size=1024   : 适合常规 GPU/CPU 内存大小；
+    - Early Stopping    : 损失平稳时自动终止，避免无效等待和过拟合；
+    - 学习率            : 使用框架默认值 5e-4（经官方调优，不应随意修改）。
 
     参数
     ----
-    adata_sc                  : 已完成注释（含 final_celltype 列）的 scRNA AnnData
-    regression_model_cls      : cell2location.models.RegressionModel 类
-    max_epochs                : 最大训练轮次上限，默认 250（官方推荐 200–300）
-    batch_size                : 每轮训练使用的细胞数，默认 1024
-    early_stopping            : 是否启用 Early Stopping，默认启用
-    early_stopping_patience   : 连续多少轮损失无改善则提前停止，默认 30 轮
-    early_stopping_min_delta  : 损失改善的最小阈值，低于此值视为"无改善"
+    adata_sc                 : 已完成 Treg 注释的 scRNA AnnData
+    regression_model_cls     : RegressionModel 类
+    max_epochs               : 最大训练轮次上限
+    batch_size               : 每轮训练批大小
+    early_stopping           : 是否启用早停
+    early_stopping_patience  : 早停等待轮次
+    early_stopping_min_delta : 早停最小改善阈值
 
-    说明
+    返回
     ----
-    RegressionModel 学习每种细胞类型（final_celltype）在各基因上的平均表达特征，
-    作为后续 Cell2location 空间建模的参考签名矩阵（cell_state_df）。
-    训练轮次过少（< 200）容易导致签名矩阵未充分收敛，影响反卷积精度；
-    Early Stopping 可在损失已经平稳时自动终止训练，避免无效等待。
-
-    关于学习率
-    ----------
-    scvi-tools / cell2location 的 RegressionModel 默认学习率为 5e-4，
-    该值已经过官方调优，不应随意修改；学习率过大（如 > 1e-3）会导致
-    -ELBO 在训练后期剧烈震荡而无法收敛（如本项目实测图所示）。
+    训练完成的 RegressionModel 对象。
     """
     regression_model_cls.setup_anndata(
         adata=adata_sc,
-        labels_key="final_celltype",  # 指定细胞类型注释列
+        labels_key="final_celltype",
     )
-
     model = regression_model_cls(adata_sc)
 
-    # cell2location / scvi-tools 的 train() 接口说明：
-    #   - max_epochs, batch_size：直接传给 train()
-    #   - early_stopping*：scvi-tools >= 0.20 支持直接作为 train() 关键字参数
-    #   - 学习率：通过 plan_kwargs={"lr": ...} 传递，默认 5e-4 无需修改
-    #   - 不额外传 plan_kwargs，保留框架默认学习率（5e-4），避免震荡
-    train_kwargs: dict = dict(
-        max_epochs=max_epochs,
-        batch_size=batch_size,
-    )
+    train_kwargs: dict = dict(max_epochs=max_epochs, batch_size=batch_size)
     if early_stopping:
-        train_kwargs["early_stopping"] = True
-        train_kwargs["early_stopping_patience"] = early_stopping_patience
-        train_kwargs["early_stopping_min_delta"] = early_stopping_min_delta
-        # 监控训练集损失（RegressionModel 无验证集，只有 train_loss_epoch）
-        train_kwargs["early_stopping_monitor"] = "train_loss_epoch"
+        train_kwargs.update({
+            "early_stopping":         True,
+            "early_stopping_patience":  early_stopping_patience,
+            "early_stopping_min_delta": early_stopping_min_delta,
+            "early_stopping_monitor":   "train_loss_epoch",
+        })
 
     model.train(**train_kwargs)
 
-    # 读取实际训练轮次：scvi-tools 将损失记录在 model.history 中，
-    # 键名为 "train_loss_epoch"（注意不是 "elbo_train"）
+    # 读取实际训练轮次（兼容不同版本的 scvi-tools history 格式）
     actual_epochs: int | str = "unknown"
     if hasattr(model, "history"):
-        history = model.history
-        # history 可能是 dict-like 或 scvi History 对象，统一用 [] 或 .get()
         for key in ("train_loss_epoch", "elbo_train", "training_loss"):
             try:
-                records = history[key]
-                # records 可能是 list、ndarray 或 pd.Series
-                actual_epochs = int(len(records))
+                actual_epochs = int(len(model.history[key]))
                 break
             except (KeyError, TypeError):
                 continue
 
-    print(f"RegressionModel 训练完成（实际训练轮次: {actual_epochs} / 上限 {max_epochs}）")
-    return model  # 训练得到了每个细胞类型的参考表达谱
+    print(f"RegressionModel 训练完成（实际轮次: {actual_epochs} / 上限 {max_epochs}）")
+    return model
 
 
 def export_signatures(model, adata_sc):
-    """导出 RegressionModel 后验中的细胞类型参考签名。"""
+    """
+    导出 RegressionModel 后验签名至 adata_sc.varm。
+
+    参数
+    ----
+    model    : 训练完成的 RegressionModel 对象
+    adata_sc : 训练时使用的 scRNA AnnData
+
+    返回
+    ----
+    ad.AnnData，后验签名已写入 varm["means_per_cluster_mu_fg"] 的数据对象。
+    """
     exported = model.export_posterior(adata_sc)
     return adata_sc if exported is None else exported
 
 
 def extract_cell_state_df(adata_sc):
-    """从参考模型后验中提取细胞类型 signature 矩阵。"""
+    """
+    从 RegressionModel 后验中提取细胞类型参考签名矩阵（cell_state_df）。
+
+    cell_state_df 的结构：
+      - 行：共享基因（gene × cell_type）
+      - 列：细胞类型名称（已去除统计量前缀）
+      - 值：每个基因在每种细胞类型中的平均表达强度
+
+    参数
+    ----
+    adata_sc : 已通过 export_signatures 导出后验的 scRNA AnnData
+
+    返回
+    ----
+    pd.DataFrame，行=基因，列=细胞类型，值=参考表达签名。
+    """
     signatures = adata_sc.varm["means_per_cluster_mu_fg"]
     if isinstance(signatures, pd.DataFrame):
         cell_state_df = signatures.copy()
@@ -217,21 +379,37 @@ def extract_cell_state_df(adata_sc):
             index=adata_sc.var_names,
             columns=factor_names,
         )
-
-    cell_state_df.index = adata_sc.var_names
+    cell_state_df.index   = adata_sc.var_names
     cell_state_df.columns = [
-        str(col).replace("means_per_cluster_mu_fg_", "") for col in cell_state_df.columns
+        str(col).replace("means_per_cluster_mu_fg_", "")
+        for col in cell_state_df.columns
     ]
-    return cell_state_df # 内容是每个基因在每类细胞中的参考表达签名
+    return cell_state_df
 
 
-def sanitize_cell_state_df(cell_state_df, eps=1e-5):
-    """清理 signature 矩阵中的无效值。"""
+def sanitize_cell_state_df(cell_state_df, eps: float = 1e-5):
+    """
+    清理 cell_state_df 签名矩阵中的无效值（Inf、NaN、负值、全零行）。
+
+    确保矩阵满足 Cell2location 空间建模的数值稳定性要求：
+      - 将 Inf 和 NaN 替换为 0；
+      - 将负值截断为 0；
+      - 对全零行用小正数 eps 填充（避免概率计算中出现零）。
+
+    参数
+    ----
+    cell_state_df : 原始签名矩阵
+    eps           : 全零行的填充值（默认 1e-5）
+
+    返回
+    ----
+    pd.DataFrame，清理后的签名矩阵。
+    """
     df = cell_state_df.replace([np.inf, -np.inf], np.nan).fillna(0.0)
     df = df.clip(lower=0.0)
     if float(df.to_numpy().sum()) <= 0:
         raise ValueError(
-            "cell_state_df 全部为 0 或无效值，请检查 RegressionModel.export_posterior() "
+            "cell_state_df 全为 0 或无效值，请检查 RegressionModel.export_posterior() "
             "以及 means_per_cluster_mu_fg 的列名是否正确。"
         )
     zero_rows = df.sum(axis=1) <= 0
@@ -240,43 +418,57 @@ def sanitize_cell_state_df(cell_state_df, eps=1e-5):
     return df
 
 
+# ============================================================
+# 后处理函数
+# ============================================================
+
 def _strip_abundance_prefix(col: str) -> str:
     """
-    去除 cell2location 后验矩阵列名中的统计量前缀，只保留细胞类型名称。
+    去除 Cell2location 后验矩阵列名中的统计量前缀，只保留细胞类型名称。
 
-    cell2location 导出的 obsm 列名格式为 "<统计量前缀>_<细胞类型>"，例如：
-      means_cell_abundance_w_sf_Hepatocyte  →  Hepatocyte
-      q05_cell_abundance_w_sf_T/NK          →  T/NK
-      q95_cell_abundance_w_sf_Fibroblast    →  Fibroblast
-      means_per_cluster_mu_fg_Treg          →  Treg
+    处理以下前缀格式：
+      means_cell_abundance_w_sf_Hepatocyte → Hepatocyte
+      q05_cell_abundance_w_sf_T/NK         → T/NK
+      q95_cell_abundance_w_sf_Fibroblast   → Fibroblast
+      means_per_cluster_mu_fg_Treg         → Treg
 
-    采用正则匹配所有已知前缀模式，保证无论使用哪种后验统计量导出，
-    最终列名都是干净的细胞类型名称。
+    参数
+    ----
+    col : 原始列名字符串
+
+    返回
+    ----
+    str，清洗后的细胞类型名称。
     """
     import re
-    # 匹配所有已知的 cell2location / scvi 后验统计量前缀
-    # 格式：(means|q05|q95|median|q25|q75)[_]cell_abundance_w_sf_ 或 means_per_cluster_mu_fg_
-    cleaned = re.sub(
-        r"^(means|q\d+|median)_?cell_abundance_w_sf_",
-        "",
-        col,
-    )
+    cleaned = re.sub(r"^(means|q\d+|median)_?cell_abundance_w_sf_", "", col)
     cleaned = re.sub(r"^means_per_cluster_mu_fg_", "", cleaned)
     return cleaned
 
 
 def compute_spot_cell_proportion(
     adata_sp,
-    abundance_key="means_cell_abundance_w_sf",
-    spot_id_col="spot_id",
+    abundance_key: str = "means_cell_abundance_w_sf",
+    spot_id_col: str = "spot_id",
 ):
     """
     将 Cell2location 后验细胞丰度转换为每个 spot 的细胞类型比例表。
 
-    列名处理：自动去除 cell2location 添加的统计量前缀（如 means_cell_abundance_w_sf_），
-    输出列名直接为细胞类型名称（如 Hepatocyte、Treg、T/NK 等）。
+    处理流程：
+      1. 从 adata.obsm 中提取细胞丰度矩阵；
+      2. 自动去除列名中的统计量前缀，保留干净的细胞类型名称；
+      3. 每个 spot 各细胞类型丰度除以该 spot 总丰度，得到 0–1 的比例值；
+      4. 在首列插入 spot_id。
 
-    返回 DataFrame：行=spot，列=细胞类型（首列为 spot_id）。
+    参数
+    ----
+    adata_sp      : Cell2location 建模后的空间 AnnData
+    abundance_key : 后验丰度矩阵在 adata.obsm 中的键名
+    spot_id_col   : 输出 DataFrame 中 spot ID 列的列名
+
+    返回
+    ----
+    pd.DataFrame，行=spot，列=细胞类型（首列为 spot_id），值=归一化比例。
     """
     if "cell_abundance" in adata_sp.obsm:
         abundance = adata_sp.obsm["cell_abundance"]
@@ -285,15 +477,17 @@ def compute_spot_cell_proportion(
 
     if not isinstance(abundance, pd.DataFrame):
         cell_types = adata_sp.uns.get("mod", {}).get("factor_names")
-        abundance = pd.DataFrame(abundance, index=adata_sp.obs_names, columns=cell_types)
+        abundance = pd.DataFrame(
+            abundance, index=adata_sp.obs_names, columns=cell_types
+        )
     else:
         abundance = abundance.copy()
 
-    # 清理列名：去掉所有统计量前缀，只保留细胞类型名称
-    abundance.columns = [_strip_abundance_prefix(str(col)) for col in abundance.columns]
+    # 清理列名：去掉统计量前缀
+    abundance.columns = [_strip_abundance_prefix(str(c)) for c in abundance.columns]
 
+    # 归一化为比例
     denom = abundance.sum(axis=1).replace(0, np.nan)
     proportions = abundance.div(denom, axis=0).fillna(0.0)
     proportions.insert(0, spot_id_col, proportions.index)
     return proportions
-# 每个 spot 的细胞类型比例表（行=spot，列=cell_type，首列为 spot_id）
