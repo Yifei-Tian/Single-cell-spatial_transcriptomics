@@ -1,251 +1,357 @@
+"""
+pre.py — 原始数据整理脚本
+============================
+职责：将各种原始格式的数据统一转换为 AnnData h5ad 格式，供后续分析流程直接读取。
+本脚本 **不做** 任何模型训练、归一化或下游分析，只做数据格式转换与结构检查。
+
+支持的转换任务：
+  1. scRNA-seq：GSE149614 txt count 矩阵 + metadata → scRNA_reference.h5ad
+  2. Visium 空间转录组：CHC20 / CHC23 Space Ranger 输出目录 → chc20_visium.h5ad / chc23_visium.h5ad
+  3. 可选：将两张 Visium 切片合并保存为 merged_visium.h5ad
+
+运行方式：
+  python pre.py                          # 转换所有数据
+  python pre.py --skip-scrna             # 跳过 scRNA 转换（已有 h5ad 时）
+  python pre.py --skip-visium            # 跳过 Visium 转换
+  python pre.py --no-merge               # 不生成合并的 Visium h5ad
+"""
+from __future__ import annotations
+
+import argparse
+import sys
 from pathlib import Path
 
 import anndata as ad
-import cell2location_pre
 import pandas as pd
 import scanpy as sc
 
 
-# 1) 指定项目根目录（保持你服务器上的原始目录）
-ROOT_DIR = Path("/home/gyw/R/Python/Single_cell_train")
-DATA_DIR = ROOT_DIR / "data"
+# ---------------------------------------------------------------------------
+# 路径配置（基于脚本自身位置动态推断，无需硬编码绝对路径）
+# ---------------------------------------------------------------------------
+_SCRIPT_DIR = Path(__file__).resolve().parent
+ROOT_DIR = _SCRIPT_DIR.parent          # 项目根目录
+DATA_DIR = ROOT_DIR / "data"           # 原始数据目录
 
-# 2) 输入/输出路径
-PATH_COUNTS = DATA_DIR / "GSE149614_HCC.scRNAseq.S71915.count.txt"
-PATH_META = DATA_DIR / "GSE149614_HCC.metadata.updated.txt"
-PATH_SCRNA_H5AD = DATA_DIR / "scRNA_reference.h5ad"
-PATH_CHC20 = DATA_DIR / "CHC20_Visium"
-PATH_CHC23 = DATA_DIR / "CHC23_Visium"
+PATH_COUNTS  = DATA_DIR / "GSE149614_HCC.scRNAseq.S71915.count.txt"
+PATH_META    = DATA_DIR / "GSE149614_HCC.metadata.updated.txt"
+PATH_CHC20   = DATA_DIR / "CHC20_Visium"
+PATH_CHC23   = DATA_DIR / "CHC23_Visium"
 
-
-def _normalize_gene_ids(index_obj) -> pd.Index:
-    """标准化 gene_id 字符串，去掉 Ensembl 版本号后缀（如 ENSG... .15）。"""
-    vals = pd.Series(index_obj.astype(str)).str.strip()
-    # index_obj.astype(str) 全转字符串；.str 向量化方法；strip() 去掉首尾空格。
-    vals = vals.str.replace(r"^(ENSG\d+)\.\d+$", r"\1", regex=True)
-    vals = vals.str.replace(r"^(ENSMUSG\d+)\.\d+$", r"\1", regex=True)
-    vals = vals.str.replace(r"^(ENST\d+)\.\d+$", r"\1", regex=True)
-    return pd.Index(vals)
+# 输出 h5ad 路径
+OUT_SCRNA   = DATA_DIR / "scRNA_reference.h5ad"
+OUT_CHC20   = DATA_DIR / "chc20_visium.h5ad"
+OUT_CHC23   = DATA_DIR / "chc23_visium.h5ad"
+OUT_MERGED  = DATA_DIR / "merged_visium.h5ad"
 
 
-def _force_gene_id_index(adata: sc.AnnData, name: str, gene_id_column: str | None = None) -> sc.AnnData:
-    """
-    改变基因索引
-    强制使用 gene_id 作为 var_names；若不满足则直接报错。
-    gene_id_column: 提供的用于替换的列名
-    """
-    if gene_id_column is not None:
-        if gene_id_column not in adata.var.columns: # 先检查该列是否存在于基因注释表 adata.var。
-            raise KeyError(f"{name} 缺少 `{gene_id_column}` 列，无法切换到 gene_id 索引。")
-        if "SYMBOL" not in adata.var.columns:
-            adata.var.set_index(gene_id_column, drop=True, inplace=True)
-            adata.var["SYMBOL"] = adata.var_names.astype(str) # 把当前 var_names 备份到 SYMBOL，用于可读展示和回溯。
-
-        adata.var.set_index(gene_id_column, drop=True, inplace=True) # 把基因索引改成你指定的 gene_id 列。
-        # drop=True 表示把原来的索引列丢弃，不保留为普通列；inplace=True 表示直接修改原 DataFrame，不返回新对象。
-
-    adata.var_names = _normalize_gene_ids(adata.var_names)
-    adata.var_names_make_unique() # 保证索引唯一，避免后续合并/建模报重复基因名错误。
-
-    if _guess_id_style(adata.var_names) != "ensembl_like":
-        raise ValueError(
-            f"{name} 当前 var_names 不是 gene_id/Ensembl 风格，"
-            "请先提供 gene_id 列或将输入矩阵第一列改为 gene_id。"
-        )
-    return adata
-
-
-def _align_shared_gene_ids(adata_sc: sc.AnnData, adata_vis: sc.AnnData) -> tuple[sc.AnnData, sc.AnnData]:
-    """
-    寻找单细胞与空间组的交集
-    仅保留两者共有的 gene_id，并统一顺序。
-    adata_sc 单细胞参考
-    adata_vis 空间转录组数据
-    返回处理后的 adata_sc 和 adata_vis，保证两者 var_names 完全一致且都是 gene_id 风格。
-    """
-    shared_gene_ids = adata_sc.var_names.intersection(adata_vis.var_names) # 求两个索引的交集，得到共有的 gene_id 列表
-    if len(shared_gene_ids) == 0:
-        raise ValueError("scRNA 与 spatial 在 gene_id 层面没有交集，无法继续建模。")
-
-    adata_sc = adata_sc[:, shared_gene_ids].copy() # 新建一个单细胞对象，只保留交集基因，保留所有细胞（行不变）
-    adata_vis = adata_vis[:, shared_gene_ids].copy() # 在空间对象中也做相同的事情
-    print(f"已统一到 gene_id，交集基因数: {len(shared_gene_ids)}")
-    return adata_sc, adata_vis
-
-
-def _guess_id_style(index_obj) -> str:
-    """
-        粗略判断索引更像 SYMBOL 还是 Ensembl/gene_ids。
-        index_obj: pandas Index 对象，通常是 adata.obs_names 或 adata.var_names；
-        .obs_names: AnnData的行索引，通常是细胞条形码；.var_names: AnnData的列索引，通常是基因ID。
-    """
-    if len(index_obj) == 0:
-        return "empty"
-    sample_vals = pd.Series(index_obj.astype(str)).head(200)
-    # .astype(str) 将索引元素统一转成字符串；pd.Series 转成 Series ，便于使用字符串向量化方法；head(200) 取前200个元素进行判断
-    ensembl_ratio = sample_vals.str.startswith(("ENSG", "ENSMUSG", "ENST")).mean()
-    # 判断是否以这些前缀开头，得到布尔序列，取平均得到比例
-    if ensembl_ratio > 0.6:
-        return "ensembl_like"
-    return "symbol_or_other"
-
-
-def _print_adata_snapshot(adata: sc.AnnData, name: str) -> None:
-    '''检查细胞和基因名字'''
-    print(f"\n=== {name} 概览 ===")
-    print(f"shape (行obs x 列var): {adata.shape}")
-    print(f"obs_names(前5): {list(adata.obs_names[:5])}")
-    print(f"var_names(前5): {list(adata.var_names[:5])}")
-    print(f"obs_names是否唯一: {adata.obs_names.is_unique}")
-    print(f"var_names是否唯一: {adata.var_names.is_unique}")
-    print(f"var_names风格判断: {_guess_id_style(adata.var_names)}")
-    print(f"obs列(前10): {list(adata.obs.columns[:10])}")
-    print(f"var列(前10): {list(adata.var.columns[:10])}")
-
-    if adata.n_obs > 0:
-        print("obs内容示例(前3行):")
-        print(adata.obs.head(3))
-    if adata.n_vars > 0:
-        print("var内容示例(前3行):")
-        print(adata.var.head(3))
-
-
-def _print_overlap(idx_a, idx_b, name_a: str, name_b: str) -> pd.Index:
-    '''
-    比较两个索引集合，共同和差异的基因
-    idx_a, idx_b 通常是 adata_sc.var_names 和 adata_vis.var_names 这样的 pandas Index 对象
-    name_a, name_b 是它们的描述字符串，用于打印输出
-    函数返回一个 Index 对象，表示 idx_a 和 idx_b 的交集
-    '''
-    overlap = idx_a.intersection(idx_b)
-    only_a = idx_a.difference(idx_b)
-    only_b = idx_b.difference(idx_a)
-
-    print(f"\n[{name_a}] vs [{name_b}] 交集统计")
-    print(f"{name_a} 总数: {len(idx_a)}")
-    print(f"{name_b} 总数: {len(idx_b)}")
-    print(f"交集数量: {len(overlap)}")
-    print(f"仅{ name_a }有: {len(only_a)}")
-    print(f"仅{ name_b }有: {len(only_b)}")
-    print(f"交集示例(前5): {list(overlap[:5])}")
-    print(f"仅{name_a}示例(前5): {list(only_a[:5])}")
-    print(f"仅{name_b}示例(前5): {list(only_b[:5])}")
-    return overlap
-
-
-def diagnose_alignment(adata_sc: sc.AnnData, adata_vis: sc.AnnData) -> None:
-    """打印索引对齐诊断信息，帮助判断是否需要切换 index。"""
-    print("\n================ 索引对齐诊断开始 ================")
-    _print_adata_snapshot(adata_sc, "scRNA") # 单细胞
-    _print_adata_snapshot(adata_vis, "Spatial(merged)") # 空间组
-
-    overlap_genes = _print_overlap( # 检查单细胞与空间组中重叠与差异基因
-        adata_sc.var_names, adata_vis.var_names, "scRNA.var_names", "Spatial.var_names"
-    )
-    _print_overlap( # 检查单细胞与空间组中重叠与差异细胞/spot
-        adata_sc.obs_names, adata_vis.obs_names, "scRNA.obs_names", "Spatial.obs_names"
-    )
-
-    if "SYMBOL" in adata_vis.var.columns:
-        overlap_symbol = adata_sc.var_names.intersection(adata_vis.var["SYMBOL"].astype(str))
-        print("\nscRNA.var_names 与 Spatial.var['SYMBOL'] 交集数量:", len(overlap_symbol))
-        print("交集示例(前5):", list(overlap_symbol[:5]))
-
-    if len(overlap_genes) == 0:
-        print("\n[提示] 基因索引交集为 0：通常说明两边命名体系不同（如 SYMBOL vs ENSG）。")
-        print("[提示] 你需要把 scRNA 与 spatial 的 var_names 统一到同一体系后再建模。")
-    else:
-        print("\n[提示] 已存在基因交集，可继续评估交集规模是否足够。")
-
-    if "sample" in adata_vis.obs.columns:
-        print("Spatial每个切片spot数量:")
-        print(adata_vis.obs["sample"].value_counts())
-    print("================ 索引对齐诊断结束 ================\n")
-
+# ---------------------------------------------------------------------------
+# 通用工具
+# ---------------------------------------------------------------------------
 
 def _require_exists(path: Path, desc: str) -> None:
-    '''
-    前置校验函数，检查某个路径是否存在
-    path: 要检查的文件/目录路径
-    desc: 路径的描述信息，用于错误提示
-    None: 如果路径存在，不返回；如果路径不存在，抛出 FileNotFoundError 异常
-    '''
+    """检查路径是否存在，不存在则抛出 FileNotFoundError。"""
     if not path.exists():
         raise FileNotFoundError(f"{desc} 不存在: {path}")
 
 
-def build_scrna_reference() -> sc.AnnData: # ->sc.AnnData 返回值注释
-    """将 txt 计数矩阵 + metadata 转成 h5ad，并做索引对齐。"""
-    _require_exists(PATH_COUNTS, "counts 文件")
-    _require_exists(PATH_META, "metadata 文件")
+def _normalize_gene_ids(index_obj: pd.Index) -> pd.Index:
+    """去掉 Ensembl ID 版本号后缀（如 ENSG00000001234.15 → ENSG00000001234）。"""
+    vals = pd.Series(index_obj.astype(str)).str.strip()
+    vals = vals.str.replace(r"^(ENSG\d+)\.\d+$",    r"\1", regex=True)
+    vals = vals.str.replace(r"^(ENSMUSG\d+)\.\d+$", r"\1", regex=True)
+    vals = vals.str.replace(r"^(ENST\d+)\.\d+$",    r"\1", regex=True)
+    return pd.Index(vals)
 
-    print("正在读取表达矩阵，7万细胞可能需要1-2分钟...")
-    counts = pd.read_csv(PATH_COUNTS, sep="\t", index_col=0)
-    adata_sc = ad.AnnData(counts.T) # 将读入的count转化为anndata对象
 
-    print("正在读取并对齐 Metadata...")
-    meta = pd.read_csv(PATH_META, sep="\t", index_col=0)
-    common_cells = adata_sc.obs_names.intersection(meta.index) # obs_names AnnData的观测名，本质是一个pandas Index
-    # intersection 求两个索引的交集
+def _guess_id_style(index_obj: pd.Index) -> str:
+    """粗略判断基因索引是 Ensembl 风格还是 Symbol 风格。"""
+    if len(index_obj) == 0:
+        return "empty"
+    sample = pd.Series(index_obj.astype(str)).head(200)
+    ratio = sample.str.startswith(("ENSG", "ENSMUSG", "ENST")).mean()
+    return "ensembl_like" if ratio > 0.6 else "symbol_or_other"
+
+
+def _set_ensembl_index(adata: sc.AnnData, name: str,
+                       gene_id_column: str | None = None) -> sc.AnnData:
+    """
+    将 AnnData 的基因索引（var_names）切换为 Ensembl ID 并去除版本号。
+
+    参数
+    ----
+    adata          : 待处理的 AnnData 对象
+    name           : 数据集名称，用于报错信息
+    gene_id_column : adata.var 中存放 Ensembl ID 的列名；
+                     若为 None，则认为 var_names 本身已是 Ensembl ID
+    """
+    if gene_id_column is not None:
+        if gene_id_column not in adata.var.columns:
+            raise KeyError(f"{name} 缺少 `{gene_id_column}` 列，无法切换到 Ensembl 索引。")
+        # 先把当前 Symbol 索引备份到 SYMBOL 列，方便人工回溯
+        adata.var["SYMBOL"] = adata.var_names.astype(str)
+        adata.var.set_index(gene_id_column, drop=True, inplace=True)
+
+    # 去除版本号、确保唯一
+    adata.var_names = _normalize_gene_ids(adata.var_names)
+    adata.var_names_make_unique()
+
+    if _guess_id_style(adata.var_names) != "ensembl_like":
+        raise ValueError(
+            f"{name} 的 var_names 不是 Ensembl 风格，"
+            "请确认 gene_id_column 参数或输入文件是否正确。"
+        )
+    return adata
+
+
+def print_summary(adata: sc.AnnData, name: str) -> None:
+    """打印 AnnData 的关键结构信息，用于转换后的快速核验。"""
+    print(f"\n{'='*50}")
+    print(f"  {name}")
+    print(f"{'='*50}")
+    print(f"  cells / spots : {adata.n_obs}")
+    print(f"  genes         : {adata.n_vars}")
+    print(f"  obs 列        : {list(adata.obs.columns)}")
+    print(f"  var 列        : {list(adata.var.columns)}")
+    print(f"  var_names 风格: {_guess_id_style(adata.var_names)}")
+    print(f"  var_names 示例: {list(adata.var_names[:5])}")
+    if "sample" in adata.obs.columns:
+        print(f"  样本分布      :\n{adata.obs['sample'].value_counts().to_string()}")
+    print()
+
+
+# ---------------------------------------------------------------------------
+# 转换任务 1：scRNA-seq txt → h5ad
+# ---------------------------------------------------------------------------
+
+def convert_scrna(
+    path_counts: Path = PATH_COUNTS,
+    path_meta: Path   = PATH_META,
+    out_path: Path    = OUT_SCRNA,
+) -> sc.AnnData:
+    """
+    将 GSE149614 txt 格式的 count 矩阵 + metadata 转换并保存为 h5ad。
+
+    转换内容
+    --------
+    - 读取 tab 分隔的 count 矩阵（基因×细胞），转置为 AnnData（细胞×基因）
+    - 对齐 metadata，将 celltype 等注释写入 adata.obs
+    - 将 var_names 标准化为 Ensembl ID（如原始数据已是 Symbol，则跳过此步，
+      保留 Symbol 索引并在 var['SYMBOL'] 中备份）
+    - 保存为 h5ad
+
+    注意
+    ----
+    GSE149614 的 count 矩阵 var_names 本身为 Gene Symbol（如 GAPDH），
+    不含 Ensembl ID 列。若后续需要与 Visium（Ensembl 索引）对齐，
+    需要额外的 Symbol→Ensembl 映射文件，此转换脚本不处理该映射，
+    由 run_preprocessing.py 中的 align_shared_genes() 负责。
+    """
+    _require_exists(path_counts, "scRNA count 矩阵")
+    _require_exists(path_meta,   "scRNA metadata")
+
+    print("正在读取 scRNA count 矩阵（7 万细胞级别，约需 1–2 分钟）...")
+    counts = pd.read_csv(path_counts, sep="\t", index_col=0)
+    # count 矩阵原始排列为 基因×细胞，AnnData 需要 细胞×基因，故转置
+    adata = ad.AnnData(counts.T)
+
+    print("正在读取并对齐 metadata...")
+    meta = pd.read_csv(path_meta, sep="\t", index_col=0)
+    common_cells = adata.obs_names.intersection(meta.index)
     if len(common_cells) == 0:
-        raise ValueError("counts 与 metadata 没有共同细胞条形码，请检查索引。")
+        raise ValueError("count 矩阵与 metadata 没有共同细胞条形码，请检查两份文件的行/列索引。")
 
-    adata_sc = adata_sc[common_cells].copy() # 只保留共同细胞
-    adata_sc.obs = meta.loc[common_cells].copy() # 对齐 Metadata 到 adata_sc.obs
-    adata_sc = _force_gene_id_index(adata_sc, "scRNA")
-    adata_sc.var_names_make_unique()
-    adata_sc.write(PATH_SCRNA_H5AD)
-    print(f"scRNA 参考数据已保存: {PATH_SCRNA_H5AD}")
-    return adata_sc
+    adata = adata[common_cells].copy()
+    adata.obs = meta.loc[common_cells].copy()
+
+    # 将当前 Symbol 索引备份，保留可读性
+    adata.var["SYMBOL"] = adata.var_names.astype(str)
+    adata.var_names_make_unique()
+
+    print(f"转换完成：{adata.n_obs} 个细胞，{adata.n_vars} 个基因")
+    if "celltype" in adata.obs.columns:
+        print("细胞类型分布：")
+        print(adata.obs["celltype"].value_counts().to_string())
+
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    adata.write_h5ad(out_path)
+    print(f"已保存: {out_path}")
+    print_summary(adata, "scRNA_reference")
+    return adata
 
 
-def _load_visium_slice(path_visium: Path, sample_name: str) -> sc.AnnData:
+# ---------------------------------------------------------------------------
+# 转换任务 2：Visium Space Ranger 目录 → h5ad
+# ---------------------------------------------------------------------------
+
+def convert_visium_slice(
+    path_visium: Path,
+    sample_name: str,
+    out_path: Path,
+) -> sc.AnnData:
+    """
+    将单张 Visium Space Ranger 输出目录转换并保存为 h5ad。
+
+    转换内容
+    --------
+    - 用 scanpy 读取 Visium 目录（filtered_feature_bc_matrix + spatial）
+    - 在 adata.obs 中添加 sample 列标记样本来源
+    - 将 var_names 备份为 SYMBOL，切换为 Ensembl ID 索引（来自 gene_ids 列）
+    - 将原始 count 矩阵额外存入 layers["counts"]，避免后续归一化操作覆盖原始数据
+    - 保存为 h5ad
+    """
     _require_exists(path_visium, f"{sample_name} Visium 目录")
 
-    adata_slice = sc.read_visium(path_visium)
-    adata_slice.var_names_make_unique()
-    adata_slice.obs["sample"] = sample_name
-    adata_slice.var["SYMBOL"] = adata_slice.var_names
+    print(f"正在读取 Visium 切片: {sample_name} ...")
+    adata = sc.read_visium(path_visium)
+    adata.var_names_make_unique()
 
-    adata_slice = _force_gene_id_index(adata_slice, f"{sample_name} spatial", gene_id_column="gene_ids")
+    # 记录样本来源，多切片合并后可通过此列区分
+    adata.obs["sample"] = sample_name
 
-    return adata_slice
+    # Space Ranger 的 features.tsv.gz：第二列（Gene Symbol）默认为 var_names，
+    # 第一列（Ensembl ID）存放在 adata.var["gene_ids"]
+    adata = _set_ensembl_index(adata, sample_name, gene_id_column="gene_ids")
+
+    # 保存原始 count（整数矩阵），供 Cell2location 等需要原始 count 的工具使用
+    adata.layers["counts"] = adata.X.copy()
+
+    print(f"转换完成：{adata.n_obs} 个 spot，{adata.n_vars} 个基因")
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    adata.write_h5ad(out_path)
+    print(f"已保存: {out_path}")
+    print_summary(adata, sample_name)
+    return adata
 
 
-def load_and_merge_visium() -> sc.AnnData:
-    """读取 CHC20/CHC23 并合并为 adata_vis。"""
-    adata_chc20 = _load_visium_slice(PATH_CHC20, "CHC20")
-    adata_chc23 = _load_visium_slice(PATH_CHC23, "CHC23")
+# ---------------------------------------------------------------------------
+# 转换任务 3（可选）：合并多张 Visium 切片 → merged_visium.h5ad
+# ---------------------------------------------------------------------------
 
-    adata_vis = ad.concat(
-        [adata_chc20, adata_chc23],
-        join="inner",
+def merge_visium_slices(
+    slices: list[tuple[Path, str, Path]],
+    out_path: Path = OUT_MERGED,
+) -> sc.AnnData:
+    """
+    将多张已转换的 Visium h5ad 文件合并为单一 AnnData，保存为 merged_visium.h5ad。
+
+    参数
+    ----
+    slices   : 列表，每个元素为 (h5ad路径, 样本名, 原始Space Ranger目录)；
+               若 h5ad 文件不存在，会先调用 convert_visium_slice() 生成
+    out_path : 合并结果的输出路径
+
+    合并策略
+    --------
+    - join="inner"：只保留所有切片共有的基因（Ensembl ID 交集）
+    - index_unique="-"：为 spot barcode 加后缀（如 AAACAATCTACTAGTT-1-CHC20），
+      避免不同切片间 barcode 重名导致索引冲突
+    """
+    adatas = []
+    keys = []
+    for h5ad_path, name, raw_path in slices:
+        if h5ad_path.exists():
+            print(f"从缓存加载: {h5ad_path}")
+            adata = sc.read_h5ad(h5ad_path)
+        else:
+            adata = convert_visium_slice(raw_path, name, h5ad_path)
+        adatas.append(adata)
+        keys.append(name)
+
+    print(f"\n正在合并 {len(adatas)} 张切片（取基因交集）...")
+    merged = ad.concat(
+        adatas,
+        join="inner",        # 只保留所有切片共有的基因
         label="sample",
-        keys=["CHC20", "CHC23"],
-        index_unique="-",
+        keys=keys,
+        index_unique="-",    # spot barcode 加后缀防重名
         merge="same",
     )
-    adata_vis.layers["counts"] = adata_vis.X.copy()
+    # 合并后重新写入 counts layer（concat 会保留各切片的 layer，但需确认）
+    if "counts" not in merged.layers:
+        merged.layers["counts"] = merged.X.copy()
 
-    print("合并后的空间数据:")
-    print(adata_vis)
-    return adata_vis
+    gene_counts = [a.n_vars for a in adatas]
+    print(f"合并后：{merged.n_obs} 个 spot，{merged.n_vars} 个基因")
+    print(f"（各切片基因数：{dict(zip(keys, gene_counts))}，交集后保留 {merged.n_vars} 个）")
+
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    merged.write_h5ad(out_path)
+    print(f"已保存: {out_path}")
+    print_summary(merged, "merged_visium")
+    return merged
+
+
+# ---------------------------------------------------------------------------
+# 命令行入口
+# ---------------------------------------------------------------------------
+
+def _parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="原始数据格式转换：txt / Visium 目录 → h5ad（不做训练或归一化）"
+    )
+    parser.add_argument("--skip-scrna",   action="store_true", help="跳过 scRNA txt→h5ad 转换")
+    parser.add_argument("--skip-visium",  action="store_true", help="跳过 Visium 目录→h5ad 转换")
+    parser.add_argument("--no-merge",     action="store_true", help="不生成合并的 merged_visium.h5ad")
+    return parser.parse_args()
+
+
+def main() -> int:
+    args = _parse_args()
+    errors: list[str] = []
+
+    # --- 任务 1：scRNA txt → h5ad ---
+    if not args.skip_scrna:
+        print("\n[任务 1/3] scRNA-seq txt → h5ad")
+        try:
+            convert_scrna()
+        except Exception as e:
+            print(f"[警告] scRNA 转换失败，已跳过：{e}", file=sys.stderr)
+            errors.append(f"scRNA: {e}")
+    else:
+        print("\n[任务 1/3] 已跳过 scRNA 转换（--skip-scrna）")
+
+    # --- 任务 2：Visium 目录 → 各自的 h5ad ---
+    if not args.skip_visium:
+        print("\n[任务 2/3] Visium Space Ranger 目录 → h5ad")
+        for raw_path, name, out_path in [
+            (PATH_CHC20, "CHC20", OUT_CHC20),
+            (PATH_CHC23, "CHC23", OUT_CHC23),
+        ]:
+            try:
+                convert_visium_slice(raw_path, name, out_path)
+            except Exception as e:
+                print(f"[警告] {name} Visium 转换失败，已跳过：{e}", file=sys.stderr)
+                errors.append(f"{name}: {e}")
+    else:
+        print("\n[任务 2/3] 已跳过 Visium 转换（--skip-visium）")
+
+    # --- 任务 3（可选）：合并多张 Visium 切片 ---
+    if not args.no_merge and not args.skip_visium:
+        print("\n[任务 3/3] 合并多张 Visium 切片 → merged_visium.h5ad")
+        slices = [
+            (OUT_CHC20, "CHC20", PATH_CHC20),
+            (OUT_CHC23, "CHC23", PATH_CHC23),
+        ]
+        try:
+            merge_visium_slices(slices)
+        except Exception as e:
+            print(f"[警告] Visium 合并失败，已跳过：{e}", file=sys.stderr)
+            errors.append(f"merge: {e}")
+    else:
+        print("\n[任务 3/3] 已跳过 Visium 合并（--no-merge 或 --skip-visium）")
+
+    # --- 汇总 ---
+    print("\n" + "="*50)
+    if errors:
+        print(f"完成（{len(errors)} 项任务失败，详见上方警告）：")
+        for err in errors:
+            print(f"  • {err}")
+        return 1
+    else:
+        print("所有转换任务完成，h5ad 文件已保存至 data/ 目录。")
+        return 0
 
 
 if __name__ == "__main__":
-    adata_sc = build_scrna_reference()
-    adata_vis = load_and_merge_visium()
-    adata_sc, adata_vis = _align_shared_gene_ids(adata_sc, adata_vis)
-    diagnose_alignment(adata_sc, adata_vis)
-
-    if "cell_type" not in adata_sc.obs.columns:
-        raise KeyError("metadata 中缺少 `cell_type` 列，无法训练 RegressionModel。")
-
-    print("开始训练 reference model...")
-    cell2location.models.RegressionModel.setup_anndata(adata_sc, labels_key="cell_type")
-    model = cell2location.models.RegressionModel(adata_sc)
-    model.train(max_epochs=250)
-
-    print("reference model 训练完成。")
-    print(f"可用于后续 Cell2location 空间建模的对象: adata_vis (n_obs={adata_vis.n_obs})")
-
+    raise SystemExit(main())
