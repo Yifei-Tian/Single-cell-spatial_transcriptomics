@@ -9,6 +9,20 @@ pre.py — 原始数据整理脚本
   2. Visium 空间转录组：CHC20 / CHC23 Space Ranger 输出目录 → chc20_visium.h5ad / chc23_visium.h5ad
   3. 可选：将两张 Visium 切片合并保存为 merged_visium.h5ad
 
+【输入文件】
+  data/GSE149614_HCC.scRNAseq.S71915.count.txt  - scRNA-seq 原始 count 矩阵（基因 × 细胞）
+  data/GSE149614_HCC.metadata.updated.txt        - scRNA-seq 细胞元数据（含细胞类型注释）
+  data/CHC20_Visium/                             - CHC20 样本 Space Ranger 输出目录
+                                                   （含 filtered_feature_bc_matrix/、spatial/ 等）
+  data/CHC23_Visium/                             - CHC23 样本 Space Ranger 输出目录
+                                                   （含 filtered_feature_bc_matrix/、spatial/ 等）
+
+【输出文件】
+  data/scRNA_reference.h5ad   - 转换后的 scRNA-seq AnnData 对象
+  data/chc20_visium.h5ad      - CHC20 Visium 转换后的空间转录组 AnnData 对象
+  data/chc23_visium.h5ad      - CHC23 Visium 转换后的空间转录组 AnnData 对象
+  data/merged_visium.h5ad     - CHC20 + CHC23 合并的 Visium AnnData 对象（可选）
+
 运行方式：
   python pre.py                          # 转换所有数据
   python pre.py --skip-scrna             # 跳过 scRNA 转换（已有 h5ad 时）

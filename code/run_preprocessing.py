@@ -20,6 +20,22 @@
       - 与 CHC20 进行关键指标对比（Treg 富集比例、niche_high 占比）；
       - 验证结论在不同患者/切片间的一致性，增强结果的普适性。
 
+【输入文件】
+    data/scRNA_reference.h5ad    - scRNA-seq 参考数据（pre.py 生成）
+    data/chc20_visium.h5ad       - CHC20 Visium 空间转录组数据（pre.py 生成）
+                                   或直接读取 data/CHC20_Visium/ Space Ranger 目录
+    data/chc23_visium.h5ad       - CHC23 Visium 空间转录组数据（pre.py 生成）
+                                   或直接读取 data/CHC23_Visium/ Space Ranger 目录
+
+【输出文件】
+    results/adata_vis_post.h5ad       - CHC20 Cell2location 反卷积后的空间 AnnData（主分析输入）
+    results/adata_vis_chc23_post.h5ad - CHC23 Cell2location 反卷积后的空间 AnnData（验证切片）
+    results/spot_cell_proportion.csv  - CHC20 每个 spot 的细胞类型比例表
+    results/spot_cell_proportion_chc23.csv - CHC23 每个 spot 的细胞类型比例表
+    results/figures/treg_bubble.png   - Treg 标志基因横版气泡图
+    results/figures/cell2loc_chc20_*.png  - CHC20 细胞类型空间分布图（各细胞类型一张）
+    results/figures/cell2loc_chc23_*.png  - CHC23 细胞类型空间分布图（各细胞类型一张）
+
 【参考文献】
     - Kleshchevnikov et al., Nature Biotechnology, 2022 (Cell2location)
     - Luecken & Theis, Molecular Systems Biology, 2019 (scRNA-seq 最佳实践)

@@ -31,12 +31,19 @@
 #   若 Cox 回归显示 HR > 1 且 P < 0.05，说明"免疫抑制生态位特征"在排除年龄、
 #   分期等混杂因素后，仍是独立不良预后因子，具有临床转化价值。
 #
+# 【输入文件】
+#   results/spatial_signature_genes.txt  — Python 端（run_spatial_niche_analysis.py）输出的
+#                                          免疫抑制生态位特征基因列表（每行一个基因名）
+#   （TCGA-LIHC 数据由脚本通过 TCGAbiolinks 包自动从 GDC 数据库下载，无需本地准备）
+#     · TCGA-LIHC RNA-seq count 矩阵（~370 例患者）
+#     · TCGA-LIHC 临床随访数据（含 OS 时间、生存状态、年龄、分期等）
+#
 # 【主要输出文件】
-#   tcga_signature_score.csv      — 每位患者的 ssGSEA 评分
-#   tcga_signature_survival.csv   — 评分 + 临床信息合并表
-#   cox_results.txt               — 多变量 Cox 回归摘要
-#   km_plot.png                   — Kaplan-Meier 生存曲线图
-#   cox_forest_plot.png           — Cox 回归森林图
+#   results/tcga_signature_score.csv      — 每位患者的 ssGSEA 评分
+#   results/tcga_signature_survival.csv   — 评分 + 临床信息合并表
+#   results/cox_results.txt               — 多变量 Cox 回归摘要
+#   results/km_plot.png                   — Kaplan-Meier 生存曲线图
+#   results/cox_forest_plot.png           — Cox 回归森林图
 # ==============================================================================
 
 # ------------------------------------------------------------------------------

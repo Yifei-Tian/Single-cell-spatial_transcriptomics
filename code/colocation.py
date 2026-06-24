@@ -1,3 +1,42 @@
+"""
+================================================================================
+脚本名称: colocation.py
+功能概述: 空间共定位（Co-localization）区域定义 —— 分析流程辅助模块
+================================================================================
+
+【整体任务说明】
+    本脚本基于 Cell2location 反卷积输出的 spot 级别细胞比例数据，使用逻辑回归
+    模型识别肿瘤细胞（Hepatocyte）与 Treg 细胞共定位的空间区域，为后续差异
+    表达分析提供阳性/阴性标签。
+
+    核心策略：
+      - 以肿瘤细胞比例与 Treg 细胞比例之和作为代理变量，通过分位数阈值或
+        固定阈值构建二值化训练目标；
+      - 训练逻辑回归模型学习两种细胞比例与共定位概率的关系；
+      - 输出每个 spot 的共定位概率评分（coloc_score）及二值化标签（coloc）。
+
+【输入文件】
+    spot_cell_proportion.csv  - Cell2location 反卷积后每个 spot 的细胞类型比例表
+                                （由 run_preprocessing.py 生成）
+                                必须包含以下列：
+                                  - 肿瘤细胞列（默认 "Hepatocyte"）
+                                  - Treg 细胞列（默认 "Treg"）
+
+【输出文件】
+    spot_with_coloc_label.csv - 在输入文件基础上新增以下两列：
+                                  - coloc_score：逻辑回归模型预测的共定位概率（0~1）
+                                  - coloc     ：二值化共定位标签（0=阴性，1=阳性）
+
+【调用方式】
+    作为独立脚本运行：
+      python colocation.py [--input PATH] [--output PATH] [选项...]
+    或被其他脚本导入调用 add_coloc_logistic() 函数。
+
+【依赖关系】
+    上游：run_preprocessing.py（生成 spot_cell_proportion.csv）
+    下游：run_de_analysis.py   （读取 spot_with_coloc_label.csv 进行 DE 分析）
+================================================================================
+"""
 import argparse
 from pathlib import Path
 

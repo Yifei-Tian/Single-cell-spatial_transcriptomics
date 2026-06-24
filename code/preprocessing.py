@@ -29,6 +29,18 @@
     后处理：
       _strip_abundance_prefix()          - 去除 cell2location 列名前缀
       compute_spot_cell_proportion()     - 将后验丰度转换为细胞比例表
+
+【输入文件】（由调用方 run_preprocessing.py 传入，本模块不直接读取文件）
+    data/scRNA_reference.h5ad          - scRNA-seq 参考数据（load_scrna_h5ad 读取）
+    data/chc20_visium.h5ad             - CHC20 Visium 空间数据（load_visium 读取）
+    data/chc23_visium.h5ad             - CHC23 Visium 空间数据（load_visium 读取）
+    或 data/CHC20_Visium/              - Space Ranger 输出目录（load_visium 直接读取原始格式）
+    或 data/CHC23_Visium/              - Space Ranger 输出目录
+
+【输出文件】（由调用方 run_preprocessing.py 接收并保存，本模块以返回值形式输出）
+    （内存中）inf_aver DataFrame       - Cell2location 参考签名矩阵（extract_cell_state_df 输出）
+    （内存中）adata_vis AnnData        - 含细胞丰度估计的空间数据（setup_and_train_regression_model 输出）
+    （内存中）proportion DataFrame     - 每个 spot 的细胞类型比例表（compute_spot_cell_proportion 输出）
 ================================================================================
 """
 from time import perf_counter
