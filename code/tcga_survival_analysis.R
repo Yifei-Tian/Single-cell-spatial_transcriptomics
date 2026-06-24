@@ -16,7 +16,8 @@
 #       → Cell2location 反卷积（每个空间 spot 的细胞类型丰度）
 #       → 构建免疫抑制生态位评分（immunosuppressive_niche_score）
 #       → 识别高免疫抑制 spot，比较其与低免疫抑制 spot 的基因差异
-#       → 输出 Top-80 上调基因 → results/spatial_signature_genes.txt  ← 关键接口
+#       → 基于 CHC20 主分析输出 Top-80 上调基因 → results/spatial_signature_genes.txt  ← 关键接口
+#       → CHC23 作为空间验证集，不直接作为 TCGA 投影输入
 #   R 端（本脚本）：
 #     读取 spatial_signature_genes.txt
 #       → Step 4: ssGSEA 对 TCGA-LIHC ~370 例患者打分
@@ -426,7 +427,7 @@ defaults <- list(
     project    = "TCGA-LIHC",                              # TCGA 肿瘤队列名称（肝细胞癌）
     workflow   = "STAR - Counts",                           # GDC 数据处理流程类型（FPKM 表达量）
     assay      = "auto",                           # 从 SummarizedExperiment 中读取的 assay 名称
-    signature  = file.path("results", "spatial_signature_genes.txt"),  # Python 端生成的签名基因列表
+    signature  = file.path("results", "spatial_signature_genes.txt"),  # Python 端基于 CHC20 主分析生成的签名基因列表
     out_dir    = "results",                                 # 所有输出文件的目录
     score_out  = "tcga_signature_score.csv",               # 输出：每位患者的 ssGSEA 评分
     merged_out = "tcga_signature_survival.csv",            # 输出：评分 + 临床信息合并表

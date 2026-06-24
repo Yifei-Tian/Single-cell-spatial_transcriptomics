@@ -10,7 +10,7 @@
       2. 绘制横版 Treg 标志基因气泡图（便于比较多个亚聚类）；
       3. 训练 Cell2location RegressionModel，导出细胞类型参考签名；
       4. 对 CHC20 Visium 切片运行 Cell2location 空间建模，获得细胞丰度估计；
-      5. 【新】对 CHC23 Visium 切片运行相同流程，生成多切片一致性验证结果；
+      5. 对 CHC23 Visium 切片运行相同流程，生成多切片一致性验证结果；
       6. 保存反卷积后的 AnnData 和细胞比例表。
 
 【多切片设计说明】
@@ -117,7 +117,6 @@ def plot_treg_dotplot_horizontal(
         adata_t,
         var_names=marker_genes,
         groupby=groupby,
-        show=False,
     )
     dp.swap_axes()          # 转置：x 轴变为聚类簇，y 轴变为基因
     dp.style(
@@ -148,7 +147,7 @@ def _run_cell2location_for_slice(
     cell2location_cls,
     sample_name: str,
     output_dir: Path,
-) -> pd.DataFrame:
+) -> tuple[pd.DataFrame, object]:
     """
     对单张 Visium 切片运行 Cell2location 空间建模，并保存结果。
 
@@ -162,7 +161,9 @@ def _run_cell2location_for_slice(
 
     返回
     ----
-    pd.DataFrame，行=spot，列=细胞类型，值=归一化比例（首列为 spot_id）。
+    (proportion_df, adata_vis_raw)
+      - proportion_df: 行=spot，列=细胞类型，值=归一化比例（首列为 spot_id）
+      - adata_vis_raw: 写入 Cell2location 后验结果后的 AnnData
     """
     LOGGER.info("[%s] Setting up Cell2location model...", sample_name)
 
@@ -208,7 +209,7 @@ def _run_cell2location_for_slice(
     proportion_df.to_csv(csv_path, index=False)
     LOGGER.info("[%s] 细胞比例表已保存: %s", sample_name, csv_path)
 
-    return proportion_df
+    return proportion_df, adata_vis_raw
 
 
 def _compare_slices(
@@ -318,78 +319,114 @@ def main():
     adata_vis_chc20 = load_visium(PATH_CHC20, sample_name="CHC20")
     adata_vis_chc23 = load_visium(PATH_CHC23, sample_name="CHC23")
 
-    # ── Step 3: 基因对齐 ─────────────────────────────────────────────────────────
-    LOGGER.info("Step 3: Aligning shared genes (scRNA vs CHC20)...")
-    # 先以 CHC20 为基准对齐
-    shared_genes, adata_sc_aligned, adata_vis_chc20_sh = align_shared_genes(
+    # ── Step 3: 基因对齐（主分析与验证集各自独立）──────────────────────────────
+    LOGGER.info("Step 3: Aligning shared genes separately for CHC20 and CHC23...")
+    shared_genes_chc20, adata_sc_chc20, adata_vis_chc20_sh = align_shared_genes(
         adata_sc, adata_vis_chc20
     )
-    LOGGER.info("Shared genes (scRNA ∩ CHC20): %d", len(shared_genes))
-
-    # CHC23 使用相同的共享基因集，确保三套数据基因维度一致
-    adata_vis_chc23_sh = adata_vis_chc23[:, shared_genes].copy()
-    LOGGER.info("CHC23 aligned to shared gene set: %d genes", adata_vis_chc23_sh.n_vars)
+    shared_genes_chc23, adata_sc_chc23, adata_vis_chc23_sh = align_shared_genes(
+        adata_sc, adata_vis_chc23
+    )
+    if len(shared_genes_chc20) == 0:
+        raise ValueError("No shared genes found between scRNA and CHC20.")
+    if len(shared_genes_chc23) == 0:
+        raise ValueError("No shared genes found between scRNA and CHC23.")
+    LOGGER.info("Shared genes (scRNA ∩ CHC20): %d", len(shared_genes_chc20))
+    LOGGER.info("Shared genes (scRNA ∩ CHC23): %d", len(shared_genes_chc23))
 
     # ── Step 4: Treg 亚群鉴定与标注 ─────────────────────────────────────────────
     LOGGER.info("Step 4: Identifying Treg subcluster...")
-    adata_t = subset_t_cells(adata_sc_aligned)
+    adata_t = subset_t_cells(adata_sc)
 
-    # 绘制横版 Treg 标志基因气泡图（新版：横版布局）
+    # 绘制横版 Treg 标志基因气泡图（使用原始 scRNA，避免空间基因过滤影响 marker 展示）
     treg_dotplot_path = OUTPUT_DIR / "t_cell_dotplot_horizontal.png"
-    try:
-        plot_treg_dotplot_horizontal(
-            adata_t,
-            marker_genes=["CD3D", "CD4", "FOXP3", "IL2RA"],
-            groupby="res.3",
-            save_path=treg_dotplot_path,
-        )
-    except Exception as exc:
+    treg_markers = ["CD3D", "CD4", "FOXP3", "IL2RA"]
+    available_treg_markers = [gene for gene in treg_markers if gene in adata_t.var_names]
+    missing_treg_markers = sorted(set(treg_markers) - set(available_treg_markers))
+    if missing_treg_markers:
         LOGGER.warning(
-            "Horizontal dotplot failed (%s); falling back to vertical version.", exc
+            "Missing Treg marker genes in scRNA data, skipped in dotplot: %s",
+            ", ".join(missing_treg_markers),
         )
-        # 回退：竖版
-        sc.pl.dotplot(adata_t, ["CD3D", "CD4", "FOXP3", "IL2RA"],
-                      groupby="res.3", show=False)
-        plt.savefig(OUTPUT_DIR / "t_cell_dotplot.png", dpi=150, bbox_inches="tight")
-        plt.close()
 
-    adata_sc_aligned = assign_treg_label(adata_sc_aligned, treg_clusters=("9", "9.0"))
+    if available_treg_markers:
+        try:
+            plot_treg_dotplot_horizontal(
+                adata_t,
+                marker_genes=available_treg_markers,
+                groupby="res.3",
+                save_path=treg_dotplot_path,
+            )
+        except Exception as exc:
+            LOGGER.warning(
+                "Horizontal dotplot failed (%s); falling back to vertical version.", exc
+            )
+            # 回退：竖版
+            sc.pl.dotplot(
+                adata_t,
+                available_treg_markers,
+                groupby="res.3",
+                show=False,
+            )
+            plt.savefig(OUTPUT_DIR / "t_cell_dotplot.png", dpi=150, bbox_inches="tight")
+            plt.close()
+    else:
+        LOGGER.warning("No Treg marker genes available; skipping Treg dotplot.")
+
+    adata_sc_chc20 = assign_treg_label(adata_sc_chc20, treg_clusters=("9", "9.0"))
+    adata_sc_chc23 = assign_treg_label(adata_sc_chc23, treg_clusters=("9", "9.0"))
     LOGGER.info(
-        "Final cell type counts:\n%s",
-        adata_sc_aligned.obs["final_celltype"].value_counts().to_string(),
+        "CHC20 reference final cell type counts:\n%s",
+        adata_sc_chc20.obs["final_celltype"].value_counts().to_string(),
+    )
+    LOGGER.info(
+        "CHC23 validation reference final cell type counts:\n%s",
+        adata_sc_chc23.obs["final_celltype"].value_counts().to_string(),
     )
 
-    # ── Step 5: 训练 RegressionModel（参考签名） ─────────────────────────────────
-    LOGGER.info("Step 5: Training RegressionModel for cell type reference signatures...")
-    model = setup_and_train_regression_model(adata_sc_aligned, regression_model_cls)
+    # ── Step 5: 训练 CHC20 RegressionModel（主分析参考签名）─────────────────────
+    LOGGER.info("Step 5: Training RegressionModel for CHC20 main analysis...")
+    model_chc20 = setup_and_train_regression_model(adata_sc_chc20, regression_model_cls)
 
-    model.plot_history(50)
-    history_path = OUTPUT_DIR / "regression_training_history.png"
-    plt.savefig(history_path, dpi=150, bbox_inches="tight")
+    model_chc20.plot_history(50)
+    history_path_chc20 = OUTPUT_DIR / "regression_training_history_CHC20.png"
+    plt.savefig(history_path_chc20, dpi=150, bbox_inches="tight")
     plt.close()
-    LOGGER.info("单细胞模型训练曲线已保存: %s", history_path)
+    LOGGER.info("CHC20 单细胞模型训练曲线已保存: %s", history_path_chc20)
 
-    adata_sc_aligned = export_signatures(model, adata_sc_aligned)
-    cell_state_df = sanitize_cell_state_df(extract_cell_state_df(adata_sc_aligned))
+    adata_sc_chc20 = export_signatures(model_chc20, adata_sc_chc20)
+    cell_state_df_chc20 = sanitize_cell_state_df(extract_cell_state_df(adata_sc_chc20))
 
     # ── Step 6: CHC20 Cell2location 空间建模 ────────────────────────────────────
     LOGGER.info("Step 6: Running Cell2location deconvolution for CHC20...")
-    prop_chc20 = _run_cell2location_for_slice(
+    prop_chc20, adata_vis_chc20_post = _run_cell2location_for_slice(
         adata_vis_raw=adata_vis_chc20_sh,
-        cell_state_df=cell_state_df,
+        cell_state_df=cell_state_df_chc20,
         cell2location_cls=cell2location_cls,
         sample_name="CHC20",
         output_dir=OUTPUT_DIR,
     )
     # 同时保存标准名称（供 run_spatial_niche_analysis.py 直接读取）
-    adata_vis_chc20_sh.write_h5ad(OUTPUT_DIR / "adata_vis_post.h5ad")
-    LOGGER.info("CHC20: Step 6 完成，adata_vis_post.h5ad 已覆盖保存。")
+    adata_vis_chc20_post.write_h5ad(OUTPUT_DIR / "adata_vis_post.h5ad")
+    LOGGER.info("CHC20: Step 6 完成，adata_vis_post.h5ad 已保存为主分析结果。")
 
-    # ── Step 7: CHC23 Cell2location 空间建模（多切片验证）─────────────────────
+    # ── Step 7: CHC23 独立验证（单独训练参考签名 + 空间建模）────────────────────
+    LOGGER.info("Step 7: Training RegressionModel for CHC23 validation...")
+    model_chc23 = setup_and_train_regression_model(adata_sc_chc23, regression_model_cls)
+
+    model_chc23.plot_history(50)
+    history_path_chc23 = OUTPUT_DIR / "regression_training_history_CHC23.png"
+    plt.savefig(history_path_chc23, dpi=150, bbox_inches="tight")
+    plt.close()
+    LOGGER.info("CHC23 单细胞模型训练曲线已保存: %s", history_path_chc23)
+
+    adata_sc_chc23 = export_signatures(model_chc23, adata_sc_chc23)
+    cell_state_df_chc23 = sanitize_cell_state_df(extract_cell_state_df(adata_sc_chc23))
+
     LOGGER.info("Step 7: Running Cell2location deconvolution for CHC23 (validation)...")
-    prop_chc23 = _run_cell2location_for_slice(
+    prop_chc23, adata_vis_chc23_post = _run_cell2location_for_slice(
         adata_vis_raw=adata_vis_chc23_sh,
-        cell_state_df=cell_state_df,
+        cell_state_df=cell_state_df_chc23,
         cell2location_cls=cell2location_cls,
         sample_name="CHC23",
         output_dir=OUTPUT_DIR,
@@ -405,9 +442,14 @@ def main():
     _compare_slices(prop_chc20, prop_chc23, cell_types_to_compare, comparison_dir)
 
     # ── Step 9: 保存共享基因列表和 scRNA AnnData ─────────────────────────────────
-    adata_sc_aligned.write_h5ad(OUTPUT_DIR / "adata_sc_post.h5ad")
-    (OUTPUT_DIR / "shared_genes.txt").write_text(
-        "\n".join(shared_genes), encoding="utf-8"
+    adata_sc_chc20.write_h5ad(OUTPUT_DIR / "adata_sc_post.h5ad")
+    adata_sc_chc20.write_h5ad(OUTPUT_DIR / "adata_sc_post_CHC20.h5ad")
+    adata_sc_chc23.write_h5ad(OUTPUT_DIR / "adata_sc_post_CHC23.h5ad")
+    (OUTPUT_DIR / "shared_genes_CHC20.txt").write_text(
+        "\n".join(shared_genes_chc20), encoding="utf-8"
+    )
+    (OUTPUT_DIR / "shared_genes_CHC23.txt").write_text(
+        "\n".join(shared_genes_chc23), encoding="utf-8"
     )
     LOGGER.info("Step 1 完成（全部步骤）。结果保存至: %s", OUTPUT_DIR)
     LOGGER.info("Run completed in %.2fs", perf_counter() - t0)
@@ -417,7 +459,7 @@ def main():
         "  Step 3 (差异表达验证):  python code/run_de_analysis.py\n"
         "  Step 4-5 (TCGA生存分析): Rscript code/tcga_survival_analysis.R"
     )
-    return adata_sc_aligned, adata_vis_chc20_sh, shared_genes
+    return adata_sc_chc20, adata_vis_chc20_post, shared_genes_chc20
 
 
 if __name__ == "__main__":

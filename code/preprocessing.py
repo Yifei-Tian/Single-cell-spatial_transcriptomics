@@ -316,7 +316,7 @@ def setup_and_train_regression_model(
             "early_stopping":         True,
             "early_stopping_patience":  early_stopping_patience,
             "early_stopping_min_delta": early_stopping_min_delta,
-            "early_stopping_monitor":   "train_loss_epoch",
+            "early_stopping_monitor":   "elbo_train",
         })
 
     model.train(**train_kwargs)

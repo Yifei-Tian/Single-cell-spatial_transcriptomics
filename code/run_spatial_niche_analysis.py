@@ -29,7 +29,8 @@
     - Keren et al., Cell, 2018 (肿瘤-免疫空间结构分型)
 
 【输入文件】
-    adata_vis_post.h5ad   - Cell2location 反卷积后的空间数据
+    adata_vis_post.h5ad   - CHC20 主分析的 Cell2location 反卷积空间数据
+                            （CHC23 为独立验证输出，默认不进入 niche 发现）
 
 【输出文件】
     spatial_niche/
@@ -129,7 +130,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--adata", type=Path,
         default=results / "adata_vis_post.h5ad",
-        help="输入 AnnData .h5ad 文件路径",
+        help="输入 AnnData .h5ad 文件路径；默认使用 CHC20 主分析结果",
     )
     parser.add_argument(
         "--out-dir", type=Path,
