@@ -428,7 +428,19 @@ def main():
 
     # ── Step 7: CHC23 独立验证（单独训练参考签名 + 空间建模）────────────────────
     LOGGER.info("Step 7: Training RegressionModel for CHC23 validation...")
-    model_chc23 = setup_and_train_regression_model(adata_sc_chc23, regression_model_cls)
+    # CHC23 单独使用更保守的早停参数：
+    #   - 观察到 CHC23 默认配置下仅 ~90 轮就提前退出，后验丰度分布几乎均一（箱线图退化为一条线），
+    #     说明模型未能真正区分细胞类型，早停触发过早。
+    #   - early_stopping_patience: 30 → 50（给 ELBO 更长的观察窗口，避免在短暂平台期误判收敛）
+    #   - early_stopping_min_delta: 1e-4 → 5e-5（对微小改善更敏感，防止过早停止）
+    #   - max_epochs: 250 → 400（允许模型充分探索参数空间）
+    model_chc23 = setup_and_train_regression_model(
+        adata_sc_chc23,
+        regression_model_cls,
+        max_epochs=400,
+        early_stopping_patience=50,
+        early_stopping_min_delta=5e-5,
+    )
 
     model_chc23.plot_history(50)
     history_path_chc23 = OUTPUT_DIR / "regression_training_history_CHC23.png"

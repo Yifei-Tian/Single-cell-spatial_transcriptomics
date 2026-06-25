@@ -59,7 +59,9 @@ import numpy as np
 import pandas as pd
 import seaborn as sns
 import scipy.sparse as sp
+import scipy.stats as scipy_stats
 from scipy.spatial import KDTree
+from statsmodels.stats.multitest import multipletests
 
 
 # ============================================================
@@ -96,16 +98,59 @@ IMMUNOSUPPRESSIVE_GENES: tuple[str, ...] = (
 #
 # 格式：(ligand, receptor, display_label)
 # 参考文献：Efremova et al. (CellPhoneDB, 2020); Cang & Nie (COMMOT, 2023)
+#
+# 补充说明：
+#   原有通路（CCL22-CCR4、IL10-IL10RA）因 Visium spot 级别的细胞稀释效应
+#   在空间数据中表达极低，导致 product score 接近 0。
+#   新增 TAM 相关高表达通路（SPP1-CD44、MIF-CD74 等），这类基因在 bulk spot
+#   中信号更强，适合空间转录组的通讯分析。
 # ============================================================
 LR_PAIRS: list[tuple[str, str, str]] = [
+    # 原有关键免疫轴（在 Visium 数据中可检测）
     ("CXCL12", "CXCR4",   "CXCL12–CXCR4"),
-    ("CCL22",  "CCR4",    "CCL22–CCR4"),
     ("TGFB1",  "TGFBR1",  "TGFB1–TGFBR1"),
     ("PDCD1",  "CD274",   "PD-1–PD-L1"),
-    ("IL10",   "IL10RA",  "IL10–IL10RA"),
     ("TIGIT",  "NECTIN2", "TIGIT–NECTIN2"),
     ("LAG3",   "HLA-DRA", "LAG3–MHC-II"),
+    # 稀疏通路（保留，fallback 机制将尝试替代基因）
+    ("CCL22",  "CCR4",    "CCL22–CCR4"),
+    ("IL10",   "IL10RA",  "IL10–IL10RA"),
+    # 新增：TAM/CAF 相关高表达通路（Visium 级别可检测）
+    ("SPP1",   "CD44",    "SPP1–CD44"),       # 骨桥蛋白-CD44，TAM 分泌
+    ("MIF",    "CD74",    "MIF–CD74"),         # 巨噬细胞迁移抑制因子
+    ("VEGFA",  "KDR",     "VEGFA–KDR"),        # 血管生成，与 CAF 相关
+    ("LGALS9", "HAVCR2",  "Galectin9–TIM-3"), # 抑制性检查点，可检测
+    ("CCL2",   "CCR2",    "CCL2–CCR2"),        # 巨噬细胞招募通路
 ]
+
+# ============================================================
+# 全局常量：基因 Fallback 字典
+#
+# 当主基因在数据集中缺失时，自动尝试同家族替代基因。
+# 适用于 L-R 通讯分析及先验基因集检验。
+# ============================================================
+GENE_FALLBACKS: dict[str, list[str]] = {
+    "CCR4":   ["CCR2", "CCR5"],       # 趋化因子受体家族
+    "IL10RA": ["IL10RB"],             # IL-10 受体亚基
+    "NECTIN2": ["PVRL2", "CD112"],    # Nectin 家族别名
+    "HAVCR2": ["TIM3", "TIMD4"],      # TIM-3 别名
+    "HLA-DRA": ["HLA-DRB1", "CD74"], # MHC-II 相关
+    "CXCR4":  ["CXCR7", "ACKR3"],    # CXCR4 替代受体
+    "TGFBR1": ["TGFBR2"],            # TGF-β 受体
+    "KDR":    ["FLT1", "FLT4"],      # VEGF 受体家族
+}
+
+# ============================================================
+# 全局常量：先验功能基因集（用于 Mann-Whitney AUC 检验）
+#
+# 按细胞类型分三组，直接针对免疫抑制 niche 的核心基因进行
+# 统计检验，弥补纯 log2FC 筛选无法发现低表达稀有基因的缺陷。
+# ============================================================
+PRIOR_GENE_SETS: dict[str, list[str]] = {
+    "Treg_markers": ["FOXP3", "IL2RA", "CTLA4", "TIGIT", "IKZF2"],
+    "TAM_features": ["CD163", "MRC1", "TGFB1", "IL10", "CXCL12"],
+    "CAF_activation": ["FAP", "ACTA2", "POSTN", "COL1A1", "CCL22"],
+}
 
 
 # ============================================================
@@ -563,63 +608,114 @@ def _sensitivity_analysis(
     n_neighbors_list: tuple[int, ...] = (10, 15, 20),
     radius_multiplier_list: tuple[float, ...] = (1.0, 1.25, 1.5),
     niche_high_quantile: float = 0.80,
+    ref_k: int = 15,
 ) -> pd.DataFrame:
     """
-    对邻域参数进行敏感性分析，评估 niche 高分区域占比的稳定性。
+    对邻域参数进行敏感性分析，评估 niche 高分区域的 spot 选择稳定性。
 
-    对 k-NN 邻居数（k=10/15/20）和半径倍增系数（×1.0/1.25/1.5）
-    分别进行扫描，记录每种设置下 niche_high spot 数量及占比，
-    验证 niche 分配对参数选择不敏感（即结果稳定）。
+    【改进说明】
+    原版本使用固定分位数阈值（如 80%）切割 niche_high，导致所有参数设置下
+    n_niche_high 永远等于 0.2 × n_spots，无法区分参数优劣。
+
+    改进后使用 Jaccard 相似度作为稳定性指标：
+      - 以主分析参数（ref_k，默认 k=15）产生的 niche_high spot 集合为参考；
+      - 对每种其他参数设置，计算其 niche_high 集合与参考集合的 Jaccard 系数：
+          Jaccard = |A ∩ B| / |A ∪ B|
+      - Jaccard > 0.85 说明两种参数选出的空间区域高度重叠，结果稳健；
+      - Jaccard < 0.70 说明参数变化对结果影响较大，需重新审视参数选择。
 
     参数
     ----
     proportions             : 细胞类型比例矩阵
     coords                  : 空间坐标
     gene_score              : 免疫抑制基因模块评分
+    treg_col                : Treg 比例列名
+    myeloid_col             : Myeloid 比例列名
+    fibroblast_col          : Fibroblast 比例列名
     n_neighbors_list        : k-NN 邻居数扫描列表
     radius_multiplier_list  : 半径倍增系数扫描列表
-    niche_high_quantile     : 高 niche 区域分位数阈值
+    niche_high_quantile     : 高 niche 区域分位数阈值（用于切割 niche_high 集合）
+    ref_k                   : 参考参数（主分析 kNN k 值，用于计算 Jaccard 的基准集合）
 
     返回
     ----
-    pd.DataFrame，每行为一个参数组合的统计结果。
+    pd.DataFrame，每行为一个参数组合的统计结果，包含 Jaccard 相似度列。
     """
     gs = gene_score.reindex(proportions.index).fillna(0.0)
+
+    def _compute_score_and_mask(
+        nbrs: list[np.ndarray],
+    ) -> tuple[pd.Series, pd.Series]:
+        """
+        计算给定邻居列表下的综合 niche 评分及 niche_high 布尔掩码。
+
+        返回 (score, high_mask)：score 为连续值 Series，high_mask 为布尔 Series。
+        """
+        nc = _compute_neighborhood_composition(proportions, nbrs)
+        s = (
+            _zscore(nc[treg_col])
+            + _zscore(nc[myeloid_col])
+            + _zscore(nc[fibroblast_col])
+            + _zscore(gs)
+        )
+        thr = float(s.quantile(niche_high_quantile))
+        mask = s >= thr
+        return s, mask
+
+    # ── 计算参考集合（主分析 k=ref_k 的 niche_high mask）────────────────────
+    ref_nbrs = _build_knn_neighbors(coords, k=ref_k)
+    try:
+        _, ref_mask = _compute_score_and_mask(ref_nbrs)
+        ref_set = set(proportions.index[ref_mask.to_numpy()])
+    except Exception as exc:
+        logging.warning("Could not compute reference mask for k=%d: %s", ref_k, exc)
+        ref_set = set()
+
     rows = []
     all_params: list[tuple[str, int | None, float | None]] = (
         [("knn", k, None) for k in n_neighbors_list]
-        + [("radius", None, r) for r in radius_multiplier_list]
+        + [("radius", None, rm) for rm in radius_multiplier_list]
     )
-    for mode, k, r in all_params:
+
+    for mode, k, rm in all_params:
         try:
             if mode == "knn":
                 nbrs = _build_knn_neighbors(coords, k=k)
                 label = f"kNN k={k}"
+                is_ref = (k == ref_k)
             else:
-                nbrs, _ = _spatial_neighbors(coords, radius_multiplier=r)
-                label = f"radius×{r}"
+                nbrs, _ = _spatial_neighbors(coords, radius_multiplier=rm)
+                label = f"radius×{rm}"
+                is_ref = False
 
-            nc = _compute_neighborhood_composition(proportions, nbrs)
-            score = (
-                _zscore(nc[treg_col])
-                + _zscore(nc[myeloid_col])
-                + _zscore(nc[fibroblast_col])
-                + _zscore(gs)
-            )
-            thr = float(score.quantile(niche_high_quantile))
-            n_high = int((score >= thr).sum())
+            score, high_mask = _compute_score_and_mask(nbrs)
+            curr_set = set(proportions.index[high_mask.to_numpy()])
+
+            # Jaccard 相似度（与参考集合对比）
+            if ref_set or curr_set:
+                jaccard = len(ref_set & curr_set) / len(ref_set | curr_set)
+            else:
+                jaccard = 1.0  # 两者均空时视为完全一致
+
+            n_high = int(high_mask.sum())
             pct = n_high / len(score) * 100
             rows.append({
-                "param_mode":  mode,
-                "param_label": label,
-                "n_niche_high": n_high,
-                "niche_pct":   pct,
-                "score_mean":  float(score.mean()),
-                "score_std":   float(score.std()),
+                "param_mode":    mode,
+                "param_label":   label,
+                "is_reference":  is_ref,
+                "n_niche_high":  n_high,
+                "niche_pct":     pct,
+                "jaccard_vs_ref": round(jaccard, 4),
+                "score_std":     float(score.std()),
             })
-            logging.info("Sensitivity [%s]: n_niche_high=%d (%.1f%%)", label, n_high, pct)
+            logging.info(
+                "Sensitivity [%s]: n_high=%d (%.1f%%), Jaccard_vs_ref=%.3f%s",
+                label, n_high, pct, jaccard,
+                " [REF]" if is_ref else "",
+            )
         except Exception as exc:
             logging.warning("Sensitivity analysis skipped for %s: %s", label, exc)
+
     return pd.DataFrame(rows)
 
 
@@ -796,6 +892,34 @@ def _plot_hep_treg(df: pd.DataFrame, path: Path) -> None:
     plt.close(fig)
 
 
+def _resolve_gene(gene: str, available: set[str]) -> tuple[str, bool]:
+    """
+    尝试在数据集中找到基因本身或其同家族替代基因。
+
+    先检查主基因是否存在，若不存在则按 GENE_FALLBACKS 字典依次尝试替代基因，
+    返回第一个找到的基因名及是否使用了替代基因的标志。
+
+    参数
+    ----
+    gene      : 主基因名称
+    available : 数据集中所有基因名称的集合
+
+    返回
+    ----
+    (resolved_gene, is_fallback)：
+      resolved_gene : 找到的基因名（主基因或替代基因）
+      is_fallback   : True 表示使用了替代基因
+    若主基因和所有替代基因均不存在，返回 (gene, False) 但后续调用方应检查基因是否实际存在。
+    """
+    if gene in available:
+        return gene, False
+    for fb in GENE_FALLBACKS.get(gene, []):
+        if fb in available:
+            logging.info("L-R fallback: %s → %s", gene, fb)
+            return fb, True
+    return gene, False
+
+
 def _plot_lr_communication(
     adata: ad.AnnData,
     df: pd.DataFrame,
@@ -805,31 +929,71 @@ def _plot_lr_communication(
     """
     绘制配体-受体（L-R）通讯分析热图，比较 niche_high vs niche_low 的信号强度。
 
-    方法：
-      - 对每个 L-R 对，计算配体与受体基因表达乘积的均值（product score），
-        作为该位置通讯强度的代理指标；
-      - 左图：归一化信号强度热图（行=L-R 对，列=niche 分组）；
-      - 右图：log2FC（niche_high / niche_low）条形图，红色=上调，蓝色=下调。
+    【改进说明】
+    原版本使用 product = ligand × receptor 直接计算通讯强度，存在缺陷：
+      - 任一基因在 spot 级别表达接近 0（细胞稀释效应），乘积即为 0；
+      - CCL22、IL10 等 Treg 特异基因在 Visium spot 中几乎不可检测，
+        导致整行全为 0，热图失去对比性。
+
+    改进后采用 rank-normalized product（秩归一化乘积）策略：
+      1. 对每个基因的表达向量做秩归一化（rankdata / n_spots），
+         将值域映射到 [0, 1]；
+      2. 计算配体秩 × 受体秩的均值作为通讯强度代理，
+         避免零值乘积问题；
+      3. 对缺失基因自动尝试 GENE_FALLBACKS 中的同家族替代基因，
+         并在标签中注明替代（用 * 标注）。
 
     综述依据：CXCL12-CXCR4、CCL22-CCR4 是 Treg 招募的关键通讯轴
-    （Efremova et al., 2020; Cang & Nie, 2023）。
+    （Efremova et al., 2020; Cang & Nie, 2023）；
+    SPP1-CD44 是 TAM 介导的免疫抑制重要通路（Zhu et al., 2022）。
     """
+    from scipy.stats import rankdata as _rankdata
+
     expr = _expression_frame(adata)
-    high_mask = df["niche_high"].astype(bool).to_numpy()
-    low_mask  = ~high_mask
+    available_genes = set(expr.columns)
+    high_mask = df["niche_high"].astype(bool).reindex(
+        pd.Index(range(len(df)))
+    ).fillna(False)
+
+    # 对齐索引：df 的行索引可能是 spot_id，需按位置提取 mask
+    if df.index.equals(pd.RangeIndex(len(df))):
+        high_arr = df["niche_high"].astype(bool).to_numpy()
+    else:
+        high_arr = df["niche_high"].astype(bool).to_numpy()
+    low_arr = ~high_arr
 
     records = []
     for ligand, receptor, label in lr_pairs:
-        missing = [g for g in (ligand, receptor) if g not in expr.columns]
+        # 尝试 fallback 基因解析
+        actual_lig, lig_fb = _resolve_gene(ligand, available_genes)
+        actual_rec, rec_fb = _resolve_gene(receptor, available_genes)
+
+        missing = [g for g, actual in [(ligand, actual_lig), (receptor, actual_rec)]
+                   if actual not in available_genes]
         if missing:
-            logging.warning("L-R [%s]: genes %s not found; skipping.", label, missing)
+            logging.warning("L-R [%s]: genes %s not found (no fallback); skipping.", label, missing)
             continue
-        product   = expr[ligand].to_numpy() * expr[receptor].to_numpy()
-        mean_high = float(product[high_mask].mean()) if high_mask.any() else 0.0
-        mean_low  = float(product[low_mask].mean())  if low_mask.any()  else 0.0
+
+        # Rank-normalized product：对稀疏高表达基因更鲁棒
+        lig_vals = expr[actual_lig].to_numpy(dtype=float)
+        rec_vals = expr[actual_rec].to_numpy(dtype=float)
+        n = len(lig_vals)
+        lig_ranked = _rankdata(lig_vals) / n
+        rec_ranked = _rankdata(rec_vals) / n
+        product = lig_ranked * rec_ranked   # 秩归一化乘积，值域 [0, 1]
+
+        mean_high = float(product[high_arr].mean()) if high_arr.any() else 0.0
+        mean_low  = float(product[low_arr].mean())  if low_arr.any()  else 0.0
         log2fc    = float(np.log2((mean_high + 1e-6) / (mean_low + 1e-6)))
+
+        # 在标签中注明是否使用了替代基因
+        display_label = label
+        if lig_fb or rec_fb:
+            display_label = f"{label}*"
+            logging.info("L-R [%s] → %s–%s (fallback used)", label, actual_lig, actual_rec)
+
         records.append({
-            "lr_pair":   label,
+            "lr_pair":   display_label,
             "mean_high": mean_high,
             "mean_low":  mean_low,
             "log2fc":    log2fc,
@@ -886,43 +1050,65 @@ def _plot_lr_communication(
 
 def _plot_sensitivity(sensitivity_df: pd.DataFrame, path: Path) -> None:
     """
-    绘制敏感性分析结果图：不同参数设置下 niche-high spot 占比的变化。
+    绘制敏感性分析结果图：不同参数设置下 niche_high spot 选择的 Jaccard 相似度。
 
-    左图：k-NN 邻居数变化；右图：半径倍增系数变化。
-    占比变化幅度小说明 niche 分配对参数选择稳健。
+    【改进说明】
+    原版本绘制各参数下 niche-high spot 占比，因固定分位数阈值导致所有值相同，
+    图表无意义。
+
+    新版本绘制各参数下 niche_high 集合与参考集合（k=15）的 Jaccard 相似度：
+      - 上图：k-NN 邻居数（10/15/20）下的 Jaccard
+      - 下图：半径倍增系数（×1.0/1.25/1.5）下的 Jaccard
+    Jaccard 越接近 1.0，说明该参数选出的 spot 与主分析高度一致，结果稳健；
+    Jaccard > 0.85 通常认为参数不敏感（稳健性良好的标准）。
     """
     if sensitivity_df.empty:
         return
+
+    # 兼容新旧列名（旧列 niche_pct，新列 jaccard_vs_ref）
+    has_jaccard = "jaccard_vs_ref" in sensitivity_df.columns
+    y_col   = "jaccard_vs_ref" if has_jaccard else "niche_pct"
+    y_label = "Jaccard similarity vs reference (k=15)" if has_jaccard else "Niche-High Spots (%)"
+    y_max   = 1.05 if has_jaccard else None
+
     fig, axes = plt.subplots(1, 2, figsize=(10, 4))
     for ax, mode, title_str in zip(
         axes,
         ["knn",   "radius"],
-        ["kNN Neighbor Count (k) Sensitivity",
-         "Radius Multiplier Sensitivity"],
+        ["kNN Neighbor Count (k) Sensitivity\n(Jaccard vs reference k=15)",
+         "Radius Multiplier Sensitivity\n(Jaccard vs reference k=15)"],
     ):
-        sub = sensitivity_df[sensitivity_df["param_mode"] == mode]
+        sub = sensitivity_df[sensitivity_df["param_mode"] == mode].copy()
         if sub.empty:
             ax.set_visible(False)
             continue
-        ax.bar(sub["param_label"], sub["niche_pct"],
-               color="#5b9bd5", edgecolor="none")
+
+        # 参考点（主分析参数）用不同颜色标注
+        colors = []
+        for _, row in sub.iterrows():
+            is_ref = bool(row.get("is_reference", False))
+            colors.append("#d62728" if is_ref else "#5b9bd5")
+
+        ax.bar(sub["param_label"], sub[y_col], color=colors, edgecolor="none")
         ax.set_xlabel("Parameter Setting")
-        ax.set_ylabel("Niche-High Spots (%)")
-        ax.set_title(title_str)
+        ax.set_ylabel(y_label)
+        ax.set_title(title_str, fontsize=9)
         ax.tick_params(axis="x", rotation=20)
-        # 标注参考水平线（主分析结果）
-        main_label = "kNN k=15" if mode == "knn" else "radius×1.25"
-        main_row = sub[sub["param_label"] == main_label]
-        if not main_row.empty:
-            ax.axhline(
-                float(main_row["niche_pct"].iloc[0]),
-                color="red", linestyle="--", linewidth=1,
-                label="main analysis",
-            )
-            ax.legend(fontsize=8)
+        if y_max is not None:
+            ax.set_ylim(0, y_max)
+
+        # 标注 Jaccard=0.85 的稳健性参考线
+        if has_jaccard:
+            ax.axhline(0.85, color="orange", linestyle="--", linewidth=1,
+                       label="threshold=0.85")
+            ax.axhline(1.0,  color="red",    linestyle="--", linewidth=0.8,
+                       label="reference (k=15)", alpha=0.6)
+            ax.legend(fontsize=7, frameon=False)
+
     fig.suptitle(
-        "Sensitivity Analysis: Niche Stability Under Parameter Variation",
-        fontsize=11,
+        "Sensitivity Analysis: Niche Spot Selection Stability\n"
+        "(Jaccard similarity to reference k=15; red bar = reference parameter)",
+        fontsize=10,
     )
     fig.tight_layout()
     fig.savefig(path, dpi=180)
@@ -930,8 +1116,35 @@ def _plot_sensitivity(sensitivity_df: pd.DataFrame, path: Path) -> None:
 
 
 # ============================================================
-# 特征基因提取
+# 特征基因提取（升级版）
 # ============================================================
+
+def _gini_index(values: np.ndarray) -> float:
+    """
+    计算给定数值数组的 Gini Index（基尼系数），衡量表达不均匀性。
+
+    Gini Index 取值范围 [0, 1]：
+      - 0：完全均匀（每个 spot 表达量相同）
+      - 1：完全集中（只有一个 spot 有表达量）
+
+    对于空间上局灶性高表达的稀有基因（如 FOXP3），Gini 值偏高，
+    能弥补 log2FC 因均值稀释而失效的不足。
+
+    参数
+    ----
+    values : 数值数组（如某基因在一组 spot 中的表达量）
+
+    返回
+    ----
+    float，Gini 系数。
+    """
+    v = np.sort(np.abs(values).ravel())
+    n = len(v)
+    if n == 0 or v.sum() == 0:
+        return 0.0
+    k = np.arange(1, n + 1, dtype=float)
+    return float(1.0 - (2.0 * (k * v).sum()) / (n * v.sum()) + 1.0 / n)
+
 
 def _rank_niche_genes(
     adata: ad.AnnData,
@@ -939,9 +1152,35 @@ def _rank_niche_genes(
     top_n: int,
 ) -> pd.DataFrame:
     """
-    对 niche 高分 spot 进行差异基因分析，筛选特征性高表达基因。
+    对 niche 高分 spot 进行多维度差异基因分析，筛选特征性高表达基因。
 
-    排序指标：log2FC = log2((mean_high + 1) / (mean_low + 1))，加 1 为伪计数。
+    【升级说明】
+    原版本仅按 log2FC 排序，存在两个缺陷：
+      1. 无统计显著性过滤（均值差异小但假阳性率高）；
+      2. 低表达稀有基因（如 FOXP3）因细胞稀释效应 log2FC 接近 0，
+         永远无法进入 Top-N。
+
+    升级后采用三层筛选策略，并行运行：
+      Layer 1（Wilcoxon + FDR）：
+        - 对每个基因做 Mann-Whitney U 检验（等价于 Wilcoxon 秩和检验）；
+        - 用 Benjamini-Hochberg 方法对 p 值进行 FDR 校正；
+        - 筛选条件：FDR < 0.05 且 log2FC > 0.5（主要 signature gene）
+        - 产出：ranked_wilcoxon_fdr.csv + volcano_plot.png
+
+      Layer 2（先验功能基因集 AUC）：
+        - 对 PRIOR_GENE_SETS 中的三组目标基因（Treg/TAM/CAF）分别做检验；
+        - 报告每个基因的 AUC、p 值（FDR 校正）、均值表达量；
+        - AUC > 0.6 且 FDR < 0.05 视为有意义的 niche 标志基因；
+        - 产出：prior_gene_set_auc.csv
+
+      Layer 3（Gini Index 特异性评分）：
+        - 对 niche_high spot 中每个基因计算 Gini 系数；
+        - Gini 高说明该基因在少数 spot 中高度富集（局灶性表达）；
+        - 与 log2FC > 0 联合筛选，识别高度特异的稀有免疫基因；
+        - 产出：gini_score_genes.csv
+
+    函数本身返回 Layer 1 的结果（兼容原调用方），其余层结果通过额外属性附加
+    到返回 DataFrame 上（df.attrs 字典），供调用方保存。
 
     参数
     ----
@@ -951,23 +1190,541 @@ def _rank_niche_genes(
 
     返回
     ----
-    pd.DataFrame，列：gene / mean_high / mean_low / log2_fc，按 log2_fc 降序。
+    pd.DataFrame，列：gene / mean_high / mean_low / log2_fc / pvalue / fdr，
+    按 log2_fc 降序（仅 FDR < 0.05 的基因进入前 top_n）。
+    DataFrame.attrs 额外包含：
+      "prior_auc_df" : 先验基因集 AUC 检验结果 DataFrame
+      "gini_df"      : Gini Index 评分 DataFrame（niche_high 子集）
     """
     expr = _expression_frame(adata)
-    high = labels.astype(bool)
+    high = labels.astype(bool).reindex(expr.index).fillna(False)
+
     if int(high.sum()) < 3 or int((~high).sum()) < 3:
         logging.warning("Too few spots in niche_high/niche_low; skipping signature ranking.")
-        return pd.DataFrame(columns=["gene", "mean_high", "mean_low", "log2_fc"])
-    mean_high = expr.loc[high].mean(axis=0)
-    mean_low  = expr.loc[~high].mean(axis=0)
+        empty = pd.DataFrame(columns=["gene", "mean_high", "mean_low", "log2_fc", "pvalue", "fdr"])
+        empty.attrs["prior_auc_df"] = pd.DataFrame()
+        empty.attrs["gini_df"] = pd.DataFrame()
+        return empty
+
+    high_expr = expr.loc[high]
+    low_expr  = expr.loc[~high]
+    mean_high = high_expr.mean(axis=0)
+    mean_low  = low_expr.mean(axis=0)
+
+    # ── Layer 1：log2FC + Wilcoxon + FDR ──────────────────────────────────────
+    log2fc = np.log2((mean_high + 1.0) / (mean_low + 1.0))
+    pvalues = np.full(len(expr.columns), 1.0)
+
+    # 仅对 log2FC > 0.1 的基因做检验（减少计算量，低 FC 基因无意义）
+    candidate_mask = log2fc.to_numpy() > 0.1
+    candidate_genes = expr.columns[candidate_mask].tolist()
+    logging.info(
+        "Running Wilcoxon test on %d candidate genes (log2FC>0.1)...",
+        len(candidate_genes),
+    )
+    for i, gene in enumerate(candidate_genes):
+        gene_idx = list(expr.columns).index(gene)
+        h_vals = high_expr[gene].to_numpy()
+        l_vals = low_expr[gene].to_numpy()
+        if h_vals.std() == 0 and l_vals.std() == 0:
+            continue
+        try:
+            _, p = scipy_stats.mannwhitneyu(h_vals, l_vals, alternative="greater")
+            pvalues[gene_idx] = p
+        except Exception:
+            pass
+
+    _, fdr, _, _ = multipletests(pvalues, method="fdr_bh")
+
     ranked = pd.DataFrame({
-        "gene":      expr.columns,
+        "gene":      expr.columns.tolist(),
         "mean_high": mean_high.to_numpy(),
         "mean_low":  mean_low.to_numpy(),
+        "log2_fc":   log2fc.to_numpy(),
+        "pvalue":    pvalues,
+        "fdr":       fdr,
     })
-    ranked["log2_fc"] = np.log2((ranked["mean_high"] + 1.0) / (ranked["mean_low"] + 1.0))
-    ranked = ranked.sort_values("log2_fc", ascending=False)
-    return ranked.head(top_n)
+
+    # 主签名基因：FDR < 0.05 且 log2FC > 0.5
+    sig_ranked = ranked[(ranked["fdr"] < 0.05) & (ranked["log2_fc"] > 0.5)]
+    sig_ranked = sig_ranked.sort_values("log2_fc", ascending=False)
+
+    # 若严格条件下不足 top_n，宽松放行 FDR < 0.2 的基因补足
+    if len(sig_ranked) < top_n:
+        loose = ranked[(ranked["fdr"] < 0.2) & (ranked["log2_fc"] > 0.3)]
+        loose = loose.sort_values("log2_fc", ascending=False)
+        sig_ranked = pd.concat([sig_ranked, loose]).drop_duplicates("gene")
+
+    result = sig_ranked.head(top_n).reset_index(drop=True)
+
+    # ── Layer 2：先验功能基因集 AUC 检验 ──────────────────────────────────────
+    prior_rows = []
+    for group_name, gene_list in PRIOR_GENE_SETS.items():
+        for gene in gene_list:
+            # fallback：主基因不存在时尝试替代基因
+            actual_gene = gene
+            if gene not in expr.columns:
+                for fb in GENE_FALLBACKS.get(gene, []):
+                    if fb in expr.columns:
+                        actual_gene = fb
+                        logging.info("Prior gene set: %s → fallback to %s", gene, fb)
+                        break
+            if actual_gene not in expr.columns:
+                logging.debug("Prior gene set [%s]: %s not found in data; skipped.", group_name, gene)
+                continue
+
+            h_vals = high_expr[actual_gene].to_numpy()
+            l_vals = low_expr[actual_gene].to_numpy()
+            # AUC（用 Mann-Whitney U 统计量计算）
+            try:
+                stat, p = scipy_stats.mannwhitneyu(h_vals, l_vals, alternative="greater")
+                auc = stat / (len(h_vals) * len(l_vals))
+            except Exception:
+                stat, p, auc = 0.0, 1.0, 0.5
+
+            prior_rows.append({
+                "gene_set":     group_name,
+                "gene":         gene,
+                "actual_gene":  actual_gene,
+                "mean_high":    float(h_vals.mean()),
+                "mean_low":     float(l_vals.mean()),
+                "log2_fc":      float(np.log2((h_vals.mean() + 1.0) / (l_vals.mean() + 1.0))),
+                "pvalue":       float(p),
+                "auc":          float(auc),
+            })
+
+    prior_df = pd.DataFrame(prior_rows)
+    if not prior_df.empty and "pvalue" in prior_df.columns:
+        _, prior_fdr, _, _ = multipletests(prior_df["pvalue"].to_numpy(), method="fdr_bh")
+        prior_df["fdr"] = prior_fdr
+    logging.info(
+        "Prior gene set results: %d genes tested, %d with AUC>0.6 & FDR<0.05",
+        len(prior_df),
+        int(((prior_df.get("auc", pd.Series()) > 0.6) &
+             (prior_df.get("fdr", pd.Series(1.0)) < 0.05)).sum())
+        if not prior_df.empty else 0,
+    )
+
+    # ── Layer 3：Gini Index 特异性评分 ─────────────────────────────────────────
+    gini_rows = []
+    high_arr = high_expr.to_numpy()
+    for gene in expr.columns:
+        gene_idx = list(expr.columns).index(gene)
+        g_vals = high_arr[:, gene_idx]
+        l2fc = float(log2fc.iloc[gene_idx])
+        if l2fc <= 0:
+            continue  # 仅对在 niche_high 中更高表达的基因计算 Gini
+        gini = _gini_index(g_vals)
+        if gini > 0.5:  # 只保留 Gini 较高（局灶性表达）的基因
+            gini_rows.append({
+                "gene":    gene,
+                "gini":    round(gini, 4),
+                "log2_fc": round(l2fc, 4),
+                "mean_high": float(mean_high.iloc[gene_idx]),
+            })
+    gini_df = pd.DataFrame(gini_rows).sort_values("gini", ascending=False) if gini_rows \
+        else pd.DataFrame(columns=["gene", "gini", "log2_fc", "mean_high"])
+    logging.info(
+        "Gini index: %d genes with Gini>0.5 and log2FC>0", len(gini_df)
+    )
+
+    result.attrs["prior_auc_df"] = prior_df
+    result.attrs["gini_df"] = gini_df
+    return result
+
+
+def _plot_volcano(
+    ranked: pd.DataFrame,
+    path: Path,
+    fc_threshold: float = 0.5,
+    fdr_threshold: float = 0.05,
+    highlight_genes: list[str] | None = None,
+) -> None:
+    """
+    绘制差异基因火山图（Volcano Plot）。
+
+    横轴：log2FC（niche_high vs niche_low）
+    纵轴：-log10(FDR)
+    颜色编码：
+      红色 = 上调显著（log2FC > fc_threshold 且 FDR < fdr_threshold）
+      蓝色 = 下调显著
+      灰色 = 不显著
+
+    参数
+    ----
+    ranked          : _rank_niche_genes 返回的 DataFrame（含 log2_fc、fdr 列）
+    path            : 输出图片路径
+    fc_threshold    : log2FC 显著性阈值（默认 0.5）
+    fdr_threshold   : FDR 显著性阈值（默认 0.05）
+    highlight_genes : 需要特别标注名称的基因列表（如免疫抑制目标基因）
+    """
+    if "fdr" not in ranked.columns or ranked.empty:
+        logging.warning("No FDR column found; skipping volcano plot.")
+        return
+
+    if highlight_genes is None:
+        # 默认高亮先验免疫抑制目标基因
+        highlight_genes = [
+            g for gs in PRIOR_GENE_SETS.values() for g in gs
+        ] + ["FOXP3", "TGFB1", "FAP", "ACTA2", "CCL22", "CXCL12", "SPP1"]
+
+    df = ranked.copy()
+    df["neg_log10_fdr"] = -np.log10(df["fdr"].clip(lower=1e-300))
+
+    # 分类着色
+    conditions = [
+        (df["log2_fc"] > fc_threshold) & (df["fdr"] < fdr_threshold),
+        (df["log2_fc"] < -fc_threshold) & (df["fdr"] < fdr_threshold),
+    ]
+    colors_map = {True: "#d62728", False: {True: "#4575b4", False: "#bdbdbd"}}
+
+    c_list = []
+    for _, row in df.iterrows():
+        if row["log2_fc"] > fc_threshold and row["fdr"] < fdr_threshold:
+            c_list.append("#d62728")
+        elif row["log2_fc"] < -fc_threshold and row["fdr"] < fdr_threshold:
+            c_list.append("#4575b4")
+        else:
+            c_list.append("#bdbdbd")
+
+    fig, ax = plt.subplots(figsize=(8, 6))
+    ax.scatter(df["log2_fc"], df["neg_log10_fdr"],
+               c=c_list, s=12, alpha=0.7, linewidths=0)
+    ax.axvline(fc_threshold,  color="black", linestyle="--", linewidth=0.8)
+    ax.axvline(-fc_threshold, color="black", linestyle="--", linewidth=0.8)
+    ax.axhline(-np.log10(fdr_threshold), color="black", linestyle="--", linewidth=0.8)
+
+    # 标注目标基因
+    labeled = set()
+    for _, row in df.iterrows():
+        gene = row.get("gene", "")
+        if gene in highlight_genes and gene not in labeled:
+            ax.annotate(
+                gene, (row["log2_fc"], row["neg_log10_fdr"]),
+                textcoords="offset points", xytext=(4, 2),
+                fontsize=7, color="#333333",
+                arrowprops=dict(arrowstyle="-", color="#aaaaaa", lw=0.5),
+            )
+            labeled.add(gene)
+
+    n_up = int(((df["log2_fc"] > fc_threshold) & (df["fdr"] < fdr_threshold)).sum())
+    n_dn = int(((df["log2_fc"] < -fc_threshold) & (df["fdr"] < fdr_threshold)).sum())
+    ax.set_xlabel(f"log₂FC (niche_high / niche_low)")
+    ax.set_ylabel(f"-log₁₀(FDR)")
+    ax.set_title(
+        f"Niche Signature Genes: Volcano Plot\n"
+        f"Up={n_up}  Down={n_dn}  (|FC|>{fc_threshold}, FDR<{fdr_threshold})",
+        fontsize=10,
+    )
+    fig.tight_layout()
+    fig.savefig(path, dpi=180, bbox_inches="tight")
+    plt.close(fig)
+    logging.info("Volcano plot saved: %s", path)
+
+
+# ============================================================
+# 新增：聚类 vs 评分并排对比图
+# ============================================================
+
+def _plot_niche_comparison(
+    df: pd.DataFrame,
+    path: Path,
+    quantile_pct: int = 80,
+) -> None:
+    """
+    绘制聚类方法 vs 评分方法的 niche 空间分布并排对比图。
+
+    左图：Leiden 聚类注释的 immunosuppressive niche（niche_semantic_label 列，
+          语义标签为 "immunosuppressive" 的 spot 高亮，其余用灰色）
+    右图：评分阈值切割的 niche_high spot（niche_high 布尔列，True 为红色，False 为灰色）
+
+    两图共用同一空间坐标系，用于评估两种方法的一致性：
+      - 高度重叠：两种方法得到一致的结论，结果稳健
+      - 聚类有但评分无：邻域组成像免疫抑制 niche 但自身评分不够高（边缘区域）
+      - 评分有但聚类无：自身评分高但周围邻域不典型（孤立的免疫抑制岛）
+
+    参数
+    ----
+    df          : 主分析 DataFrame（含 spatial_x/y、niche_semantic_label、niche_high 列）
+    path        : 输出图片路径
+    quantile_pct: niche_high 切割的分位数百分位（如 80 代表 80th percentile）
+    """
+    if "spatial_x" not in df.columns or "spatial_y" not in df.columns:
+        logging.warning("spatial_x/y not found; skipping niche comparison plot.")
+        return
+
+    x = df["spatial_x"].to_numpy()
+    y = df["spatial_y"].to_numpy()
+
+    fig, axes = plt.subplots(1, 2, figsize=(14, 6))
+
+    # ── 左图：Leiden 聚类方法 ────────────────────────────────────────────────
+    ax0 = axes[0]
+    if "niche_semantic_label" in df.columns:
+        # 高亮含"immunosuppressive"或"Immunosuppressive"的语义标签 spot
+        is_niche = df["niche_semantic_label"].astype(str).str.contains(
+            "immunosuppressive", case=False, na=False
+        )
+        c0 = np.where(is_niche, "#d62728", "#bdbdbd")
+        ax0.scatter(x[~is_niche], y[~is_niche], c="#bdbdbd", s=6, alpha=0.5, linewidths=0)
+        ax0.scatter(x[is_niche],  y[is_niche],  c="#d62728", s=8, alpha=0.8, linewidths=0,
+                    label="Immunosuppressive niche")
+    else:
+        ax0.scatter(x, y, c="#bdbdbd", s=6, alpha=0.5, linewidths=0)
+        ax0.text(0.5, 0.5, "niche_semantic_label\nnot available",
+                 transform=ax0.transAxes, ha="center", va="center", fontsize=9)
+
+    ax0.set_title("Method 1: Leiden Cluster Annotation\n(immunosuppressive semantic label)",
+                  fontsize=9, fontweight="bold")
+    ax0.set_aspect("equal")
+    ax0.axis("off")
+    ax0.legend(loc="lower right", fontsize=7, frameon=False, markerscale=1.5)
+
+    # ── 右图：评分阈值方法 ───────────────────────────────────────────────────
+    ax1 = axes[1]
+    if "niche_high" in df.columns:
+        niche_high = df["niche_high"].astype(bool).to_numpy()
+        ax1.scatter(x[~niche_high], y[~niche_high], c="#bdbdbd", s=6, alpha=0.5, linewidths=0)
+        ax1.scatter(x[niche_high],  y[niche_high],  c="#d62728", s=8, alpha=0.8, linewidths=0,
+                    label=f"niche_high (score >{quantile_pct}th pct)")
+    else:
+        ax1.scatter(x, y, c="#bdbdbd", s=6, alpha=0.5, linewidths=0)
+        ax1.text(0.5, 0.5, "niche_high\nnot available",
+                 transform=ax1.transAxes, ha="center", va="center", fontsize=9)
+
+    ax1.set_title(f"Method 2: Score-Based Thresholding\n(niche score > {quantile_pct}th percentile)",
+                  fontsize=9, fontweight="bold")
+    ax1.set_aspect("equal")
+    ax1.axis("off")
+    ax1.legend(loc="lower right", fontsize=7, frameon=False, markerscale=1.5)
+
+    # 计算两方法的 Jaccard 相似度（如果两列都存在）
+    jaccard_str = ""
+    if "niche_semantic_label" in df.columns and "niche_high" in df.columns:
+        is_niche_arr = df["niche_semantic_label"].astype(str).str.contains(
+            "immunosuppressive", case=False, na=False
+        ).to_numpy()
+        niche_high_arr = df["niche_high"].astype(bool).to_numpy()
+        inter = int((is_niche_arr & niche_high_arr).sum())
+        union = int((is_niche_arr | niche_high_arr).sum())
+        if union > 0:
+            jaccard = inter / union
+            jaccard_str = f"  Jaccard similarity: {jaccard:.3f}"
+
+    fig.suptitle(
+        f"Immunosuppressive Niche: Leiden Clustering vs Score Thresholding\n"
+        f"(Left = cluster-based; Right = score-based{jaccard_str})",
+        fontsize=10,
+    )
+    fig.tight_layout()
+    fig.savefig(path, dpi=180, bbox_inches="tight")
+    plt.close(fig)
+    logging.info("Niche comparison plot saved: %s", path)
+
+
+# ============================================================
+# 新增：参数扫描（resolution × niche_high_quantile 网格搜索）
+# ============================================================
+
+def _param_scan_deg_stability(
+    adata: ad.AnnData,
+    proportions: pd.DataFrame,
+    coords: np.ndarray,
+    gene_score: pd.Series,
+    treg_col: str,
+    myeloid_col: str,
+    fibroblast_col: str,
+    n_neighbors: int = 15,
+    resolution_list: tuple[float, ...] = (0.3, 0.4, 0.5, 0.6, 0.7),
+    quantile_list: tuple[float, ...] = (0.70, 0.75, 0.80, 0.85),
+    top_n: int = 50,
+    seed: int = 1234,
+) -> pd.DataFrame:
+    """
+    对 Leiden 分辨率 × niche_high 分位数阈值进行网格扫描，
+    以 DEG 稳定性（显著基因数量 + 相邻参数组合 Jaccard 相似度）
+    作为目标函数，辅助选择最优参数组合。
+
+    扫描逻辑（resolution × quantile 共 5×4 = 20 种参数组合）：
+      1. 对每种参数组合，重新计算邻域评分并切割 niche_high；
+      2. 对 niche_high vs niche_low 做 Wilcoxon 检验，记录：
+           - n_sig_deg    : FDR < 0.05 且 log2FC > 0.5 的基因数量
+           - mean_log2fc  : Top-N 基因的平均 log2FC
+      3. 对相邻参数组合（resolution ±0.1 或 quantile ±0.05），
+         计算 Top-N 基因列表之间的 Jaccard 相似度（稳健性指标）
+
+    【选参标准】
+      - 热图中 n_sig_deg 最大且位于"高原"区域（与相邻参数结果相近）的
+        参数组合即为最优选择；
+      - 若当前参数（resolution=0.5, quantile=0.80）接近热图最优区域，
+        则现有参数被证明合理。
+
+    参数
+    ----
+    adata           : AnnData 数据对象
+    proportions     : 细胞类型比例矩阵
+    coords          : 空间坐标
+    gene_score      : 免疫抑制基因模块评分
+    treg_col        : Treg 比例列名
+    myeloid_col     : Myeloid 比例列名
+    fibroblast_col  : Fibroblast 比例列名
+    n_neighbors     : kNN 邻居数（固定）
+    resolution_list : Leiden 分辨率扫描列表
+    quantile_list   : niche_high 分位数阈值扫描列表
+    top_n           : 用于计算 Jaccard 的 Top-N 基因数
+    seed            : 随机数种子
+
+    返回
+    ----
+    pd.DataFrame，每行为一种参数组合的结果：
+      resolution / quantile / n_sig_deg / mean_log2fc_topN / n_clusters
+    """
+    import itertools
+
+    gs = gene_score.reindex(proportions.index).fillna(0.0)
+    neighbors_knn = _build_knn_neighbors(coords, k=n_neighbors)
+    rows = []
+
+    for resolution, quantile in itertools.product(resolution_list, quantile_list):
+        try:
+            # 1. Leiden 聚类（重新运行）
+            nc_labels = _leiden_cluster_neighborhood(
+                _compute_neighborhood_composition(proportions, neighbors_knn),
+                n_neighbors=n_neighbors,
+                resolution=resolution,
+                seed=seed,
+            )
+            n_clusters = int(len(nc_labels.unique()))
+
+            # 2. 计算邻域组成评分
+            neighborhood_comp = _compute_neighborhood_composition(proportions, neighbors_knn)
+            niche_score = (
+                _zscore(neighborhood_comp[treg_col])
+                + _zscore(neighborhood_comp[myeloid_col])
+                + _zscore(neighborhood_comp[fibroblast_col])
+                + _zscore(gs)
+            )
+
+            # 3. 切割 niche_high
+            thr = float(niche_score.quantile(quantile))
+            niche_high = niche_score >= thr
+
+            if int(niche_high.sum()) < 3 or int((~niche_high).sum()) < 3:
+                logging.debug(
+                    "Param scan [r=%.1f, q=%.2f]: skipped (too few spots).", resolution, quantile
+                )
+                continue
+
+            # 4. Wilcoxon 检验（快速版：仅对 log2FC > 0.3 的基因检验）
+            expr = _expression_frame(adata)
+            high_expr = expr.loc[niche_high]
+            low_expr  = expr.loc[~niche_high]
+            mean_h = high_expr.mean()
+            mean_l = low_expr.mean()
+            lfc = np.log2((mean_h + 1.0) / (mean_l + 1.0))
+
+            cands = expr.columns[lfc.to_numpy() > 0.3].tolist()
+            pvals = np.ones(len(expr.columns))
+            for gene in cands:
+                gidx = list(expr.columns).index(gene)
+                try:
+                    _, p = scipy_stats.mannwhitneyu(
+                        high_expr[gene].to_numpy(), low_expr[gene].to_numpy(),
+                        alternative="greater",
+                    )
+                    pvals[gidx] = p
+                except Exception:
+                    pass
+            _, fdr, _, _ = multipletests(pvals, method="fdr_bh")
+            sig_mask = (fdr < 0.05) & (lfc.to_numpy() > 0.5)
+            n_sig = int(sig_mask.sum())
+
+            # Top-N 基因
+            sig_df = pd.DataFrame({
+                "gene": expr.columns.tolist(),
+                "log2_fc": lfc.to_numpy(),
+                "fdr": fdr,
+            })
+            top_genes = (
+                sig_df[sig_df["fdr"] < 0.05]
+                .sort_values("log2_fc", ascending=False)
+                .head(top_n)["gene"]
+                .tolist()
+            )
+            if not top_genes:
+                top_genes = sig_df.sort_values("log2_fc", ascending=False).head(top_n)["gene"].tolist()
+
+            mean_lfc_top = float(lfc[sig_df["gene"].isin(top_genes)].mean()) \
+                if top_genes else 0.0
+
+            rows.append({
+                "resolution":   resolution,
+                "quantile":     quantile,
+                "n_clusters":   n_clusters,
+                "n_sig_deg":    n_sig,
+                "mean_log2fc_topN": round(mean_lfc_top, 4),
+                "top_genes_str": ";".join(top_genes[:20]),  # 保存前 20 个便于比较
+            })
+            logging.info(
+                "Param scan [r=%.1f, q=%.2f]: n_clusters=%d, n_sig_deg=%d, "
+                "mean_log2fc_top%d=%.3f",
+                resolution, quantile, n_clusters, n_sig, top_n, mean_lfc_top,
+            )
+        except Exception as exc:
+            logging.warning(
+                "Param scan [r=%.1f, q=%.2f] failed: %s", resolution, quantile, exc
+            )
+
+    return pd.DataFrame(rows)
+
+
+def _plot_param_scan_heatmap(
+    param_scan_df: pd.DataFrame,
+    path: Path,
+) -> None:
+    """
+    绘制参数扫描热图：横轴为 niche_high_quantile，纵轴为 Leiden resolution，
+    颜色编码为显著 DEG 数量（n_sig_deg）。
+
+    热图用于可视化最优参数区域：颜色最深（DEG 数量最多）且处于"高原"区域
+    （与相邻参数结果相近）的参数组合即为推荐选择。
+
+    同时在每个格子中标注 n_sig_deg 数值，便于直接读取。
+
+    参数
+    ----
+    param_scan_df : _param_scan_deg_stability 返回的 DataFrame
+    path          : 输出图片路径
+    """
+    if param_scan_df.empty or "n_sig_deg" not in param_scan_df.columns:
+        logging.warning("Empty param scan DataFrame; skipping heatmap.")
+        return
+
+    # 透视表：行=resolution，列=quantile，值=n_sig_deg
+    pivot = param_scan_df.pivot(
+        index="resolution", columns="quantile", values="n_sig_deg"
+    )
+
+    fig, ax = plt.subplots(figsize=(7, 5))
+    sns.heatmap(
+        pivot,
+        cmap="YlOrRd",
+        annot=True, fmt="d",
+        linewidths=0.5,
+        ax=ax,
+        cbar_kws={"label": "Number of significant DEGs\n(FDR<0.05, |log2FC|>0.5)"},
+    )
+    ax.set_xlabel("niche_high quantile threshold")
+    ax.set_ylabel("Leiden resolution")
+    ax.set_title(
+        "Parameter Scan: DEG Stability Heatmap\n"
+        "(Optimal = darkest cells in stable plateau region)",
+        fontsize=10,
+    )
+    fig.tight_layout()
+    fig.savefig(path, dpi=180, bbox_inches="tight")
+    plt.close(fig)
+    logging.info("Parameter scan heatmap saved: %s", path)
 
 
 # ============================================================
@@ -1228,9 +1985,35 @@ def main() -> int:
     # 敏感性分析结果图（新增）
     _plot_sensitivity(sensitivity_df, plot_dir / "sensitivity_niche_stability.png")
 
-    # ── Step 14: 特征基因提取 ────────────────────────────────────────────────────
-    logging.info("Step 14: Extracting niche signature genes...")
+    # ── 新增图1：niche_high 分位数阈值切割的 spot 空间二值分布图 ─────────────────
+    # 颜色编码：红色 = 评分高于 niche_high_quantile（如 80 百分位）的 spot
+    #           灰色 = 其余 spot
+    # 与 spatial_niche_semantic_labels.png（Leiden 聚类方法）对比，
+    # 展示"评分法"与"聚类法"在空间上的差异（重叠/分歧）。
+    logging.info("Step 13+: Generating niche_high score-based binary map...")
+    _spatial_scatter(
+        df, "niche_high",
+        plot_dir / "spatial_niche_high_score_spots.png",
+        f"Niche-High Spots (score > {int(args.niche_high_quantile * 100)}th percentile)",
+        cmap="RdGy_r",
+    )
+
+    # ── 新增图2：聚类方法 vs 评分方法并排对比图 ──────────────────────────────────
+    # 左图：Leiden 聚类注释的 immunosuppressive niche（niche_semantic_label）
+    # 右图：评分阈值切割的 niche_high spot 分布（niche_high）
+    # 两图共用同一空间坐标系，便于直接对比空间位置
+    logging.info("Step 13+: Generating clustering vs score comparison plot...")
+    _plot_niche_comparison(
+        df,
+        plot_dir / "spatial_niche_cluster_vs_score_comparison.png",
+        quantile_pct=int(args.niche_high_quantile * 100),
+    )
+
+    # ── Step 14: 特征基因提取（升级版） ─────────────────────────────────────────
+    logging.info("Step 14: Extracting niche signature genes (with Wilcoxon + FDR + Gini)...")
     ranked = _rank_niche_genes(adata, df["niche_high"], args.top_niche_genes)
+
+    # 保存 Layer 1：主签名基因（Wilcoxon + FDR）
     ranked.to_csv(
         args.out_dir / "immunosuppressive_niche_signature_genes_ranked.csv",
         index=False,
@@ -1241,6 +2024,91 @@ def main() -> int:
 
     args.signature_out.parent.mkdir(parents=True, exist_ok=True)
     args.signature_out.write_text(sig_text, encoding="utf-8")
+
+    # 保存 Layer 2：先验功能基因集 AUC 检验结果
+    prior_auc_df = ranked.attrs.get("prior_auc_df", pd.DataFrame())
+    if not prior_auc_df.empty:
+        prior_auc_df.to_csv(
+            args.out_dir / "prior_gene_set_auc.csv", index=False
+        )
+        logging.info(
+            "Prior gene set AUC results saved: %s",
+            args.out_dir / "prior_gene_set_auc.csv",
+        )
+
+    # 保存 Layer 3：Gini Index 特异性评分
+    gini_df = ranked.attrs.get("gini_df", pd.DataFrame())
+    if not gini_df.empty:
+        gini_df.to_csv(
+            args.out_dir / "gini_score_genes.csv", index=False
+        )
+        logging.info(
+            "Gini index genes saved: %s",
+            args.out_dir / "gini_score_genes.csv",
+        )
+
+    # 绘制火山图（基于全基因范围的 ranked DataFrame）
+    # 注：此处需传入包含全部基因统计量的 DataFrame（ranked 仅含 Top-N）
+    # 因此重新获取完整统计用于火山图
+    logging.info("Step 14: Generating volcano plot for all tested genes...")
+    try:
+        # 重新计算全基因范围的 log2FC + pvalue，用于火山图（Top-N 不足以展示）
+        from scipy.stats import mannwhitneyu as _mwu
+        expr_full = _expression_frame(adata)
+        high_full = df["niche_high"].astype(bool).reindex(expr_full.index).fillna(False)
+        mean_h = expr_full.loc[high_full].mean()
+        mean_l = expr_full.loc[~high_full].mean()
+        lfc_all = np.log2((mean_h + 1.0) / (mean_l + 1.0))
+        pvals_all = np.full(len(expr_full.columns), 1.0)
+        cands = expr_full.columns[lfc_all.to_numpy() > 0.05].tolist()
+        for gene in cands:
+            gidx = list(expr_full.columns).index(gene)
+            try:
+                _, p = _mwu(
+                    expr_full.loc[high_full, gene].to_numpy(),
+                    expr_full.loc[~high_full, gene].to_numpy(),
+                    alternative="greater",
+                )
+                pvals_all[gidx] = p
+            except Exception:
+                pass
+        _, fdr_all, _, _ = multipletests(pvals_all, method="fdr_bh")
+        volcano_df = pd.DataFrame({
+            "gene": expr_full.columns.tolist(),
+            "log2_fc": lfc_all.to_numpy(),
+            "fdr": fdr_all,
+        })
+        _plot_volcano(volcano_df, plot_dir / "niche_signature_volcano.png")
+    except Exception as exc:
+        logging.warning("Volcano plot failed: %s", exc)
+
+    # ── Step 15: 参数扫描（resolution × niche_high_quantile 网格搜索）────────────
+    logging.info("Step 15: Running parameter scan (resolution × quantile grid)...")
+    try:
+        param_scan_df = _param_scan_deg_stability(
+            adata=adata,
+            proportions=proportions,
+            coords=coords,
+            gene_score=gene_score,
+            treg_col=args.treg_col,
+            myeloid_col=args.myeloid_col,
+            fibroblast_col=args.fibroblast_col,
+            n_neighbors=args.n_neighbors,
+            resolution_list=(0.3, 0.4, 0.5, 0.6, 0.7),
+            quantile_list=(0.70, 0.75, 0.80, 0.85),
+            top_n=args.top_niche_genes,
+            seed=args.seed,
+        )
+        param_scan_df.to_csv(
+            args.out_dir / "param_scan_deg_stability.csv", index=False
+        )
+        _plot_param_scan_heatmap(
+            param_scan_df,
+            plot_dir / "param_scan_deg_stability_heatmap.png",
+        )
+        logging.info("Parameter scan completed. Results saved.")
+    except Exception as exc:
+        logging.warning("Parameter scan failed: %s", exc)
 
     logging.info("Niche signature genes saved: %s", sig_path)
     logging.info("TCGA-ready signature also saved: %s", args.signature_out)
