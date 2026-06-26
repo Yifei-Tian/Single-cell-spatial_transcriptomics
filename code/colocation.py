@@ -9,11 +9,20 @@
     模型识别肿瘤细胞（Hepatocyte）与 Treg 细胞共定位的空间区域，为后续差异
     表达分析提供阳性/阴性标签。
 
-    核心策略：
-      - 以肿瘤细胞比例与 Treg 细胞比例之和作为代理变量，通过分位数阈值或
-        固定阈值构建二值化训练目标；
-      - 训练逻辑回归模型学习两种细胞比例与共定位概率的关系；
-      - 输出每个 spot 的共定位概率评分（coloc_score）及二值化标签（coloc）。
+    核心策略（add_coloc_logistic 函数）：
+      1. 以肿瘤细胞比例与 Treg 细胞比例之和作为代理变量：
+           - 若提供 --sum-threshold，直接使用该固定阈值；
+           - 否则按 --threshold-quantile（默认 0.8 分位数）自动估计阈值；
+      2. 将比例之和超过阈值的 spot 标记为临时正样本（y=1），训练逻辑回归；
+      3. 用训练好的模型对所有 spot 预测共定位概率（coloc_score，0~1）；
+      4. 对预测分数再次进行二值化：
+           - 若提供 --label-threshold，直接用该阈值；
+           - 否则按 --label-quantile（默认 0.8 分位数）自动估计；
+      5. 打印 coloc=1 的 spot 占比供质控参考。
+
+    注意：本模块作为辅助工具，其 coloc 标签逻辑已在 run_spatial_niche_analysis.py
+    中通过更系统的 niche_high 评分机制部分替代。本脚本主要供 run_de_analysis.py
+    在需要显式 coloc 标签时调用。
 
 【输入文件】
     spot_cell_proportion.csv  - Cell2location 反卷积后每个 spot 的细胞类型比例表
@@ -24,17 +33,24 @@
 
 【输出文件】
     spot_with_coloc_label.csv - 在输入文件基础上新增以下两列：
-                                  - coloc_score：逻辑回归模型预测的共定位概率（0~1）
+                                  - coloc_score：逻辑回归预测的共定位概率（0~1）
                                   - coloc     ：二值化共定位标签（0=阴性，1=阳性）
 
 【调用方式】
     作为独立脚本运行：
       python colocation.py [--input PATH] [--output PATH] [选项...]
+      主要参数：
+        --tumor-col          肿瘤细胞比例列名（默认 Hepatocyte）
+        --treg-col           Treg 细胞比例列名（默认 Treg）
+        --sum-threshold      共定位比例和阈值（不提供则自动按分位数估计）
+        --threshold-quantile 自动估计 sum_threshold 用的分位数（默认 0.8）
+        --label-threshold    coloc 标签分数阈值（不提供则自动估计）
+        --label-quantile     自动估计 label_threshold 用的分位数（默认 0.8）
     或被其他脚本导入调用 add_coloc_logistic() 函数。
 
 【依赖关系】
     上游：run_preprocessing.py（生成 spot_cell_proportion.csv）
-    下游：run_de_analysis.py   （读取 spot_with_coloc_label.csv 进行 DE 分析）
+    下游：run_de_analysis.py（读取 spot_with_coloc_label.csv 进行差异表达分析）
 ================================================================================
 """
 import argparse

@@ -6,47 +6,70 @@
 
 【整体任务说明】
     本脚本以 CHC23 切片的 Cell2location 反卷积结果为输入，执行三个阶段的
-    独立验证分析，证明在 CHC20 上发现的免疫抑制空间生态位具有跨患者重现性：
+    独立验证分析，证明在 CHC20 上发现的免疫抑制空间生态位具有跨患者重现性。
 
-    阶段一（Step 2 重跑）：
-        对 CHC23 运行与主分析完全相同的 Niche 分析流程，输出平行的结果目录
+    阶段一（Niche 分析重跑）：
+        通过 subprocess 调用 run_spatial_niche_analysis.py，对 CHC23 运行与
+        CHC20 主分析完全相同参数的 Niche 分析（n_neighbors、leiden_resolution、
+        niche_high_quantile、seed 均保持一致），输出平行结果目录
         results/spatial_niche_chc23/，用于与 CHC20 逐图对比。
 
     阶段二（跨切片一致性量化）：
         1. Signature gene 重叠度（Jaccard 相似度）：
-           读取两张切片各自 Top-50 signature gene 列表，计算 Jaccard 系数。
-           验收标准：Jaccard ≥ 0.4（50 个基因中 ≥ 20 个重叠）。
+             读取两张切片各自 Top-N signature gene 列表，计算 Jaccard 系数。
+             验收标准：Jaccard ≥ 0.4（默认 Top-50 中 ≥ 20 个重叠）。
         2. 细胞类型比例 Spearman 相关：
-           对两个切片的各细胞类型均值比例向量做 Spearman 相关分析。
+             对两个切片各细胞类型的 spot 级别均值比例向量做 Spearman 相关，
+             生成带置信区间的散点图。
         3. niche_high 占比一致性：
-           从 spatial_niche_parameters.csv 读取 niche_high 占比，
-           判断两切片差异是否 < 5%。
+             从两张切片的 spatial_niche_parameters.csv 读取 niche_high 占比，
+             计算绝对差值，判断是否 < 5%（验收阈值可配置）。
+        以上三项指标汇总至 cross_slice_consistency_report.csv。
 
-    阶段三（Step 3 DE 验证）：
-        使用 CHC23 自己的 niche_high 标签作为分组变量，调用 scanpy Wilcoxon
-        检验完成差异表达分析，输出 CHC23 的 signature gene 列表。
-        最终生成 CHC20/CHC23 Top-50 signature gene 重叠可视化图（UpSet 风格）。
+    阶段三（DE 差异表达验证）：
+        使用 CHC23 自己的 niche_high 标签作为分组变量，以 adata_vis_post_CHC23.h5ad
+        为输入，调用 scanpy Wilcoxon 检验完成差异表达分析，输出 CHC23 的
+        signature gene 列表。
+        最终生成 CHC20/CHC23 Top-50 signature gene 重叠可视化图（韦恩图 + 热图）。
 
 【输入文件】
     results/adata_vis_post_CHC23.h5ad         - CHC23 Cell2location 反卷积后的空间数据
                                                 （由 run_preprocessing.py Step 7 生成）
     results/spatial_niche/                    - CHC20 主分析 niche 结果目录
-      ├── immunosuppressive_niche_signature_genes_ranked.csv  - CHC20 Top 基因表
-      └── spatial_niche_parameters.csv                        - CHC20 分析参数
+      ├── immunosuppressive_niche_signature_genes_ranked.csv  - CHC20 签名基因排名表
+      └── spatial_niche_parameters.csv                        - CHC20 分析参数与阈值
 
 【输出文件】
-    results/spatial_niche_chc23/              - CHC23 平行 Niche 分析结果目录
-      ├── spatial_niche_scores.csv            - CHC23 完整评分表
-      ├── spatial_niche_parameters.csv        - CHC23 分析参数
+    results/spatial_niche_chc23/                    - CHC23 平行 Niche 分析结果目录
+      ├── spatial_niche_scores.csv                  - CHC23 完整评分表
+      ├── spatial_niche_parameters.csv              - CHC23 分析参数
       ├── immunosuppressive_niche_signature_genes_ranked.csv
       ├── immunosuppressive_niche_signature_genes.txt
-      └── plots/                              - CHC23 各类可视化图表
-    results/chc23_validation/                 - 跨切片一致性量化结果
-      ├── cross_slice_consistency_report.csv  - 一致性量化指标汇总表
-      ├── signature_gene_overlap_venn.png     - 两切片 Top-50 基因重叠韦恩图
-      ├── celltype_spearman_correlation.png   - 细胞类型比例 Spearman 相关图
-      └── gene_overlap_heatmap.png            - 共同基因表达热图
-    results/spatial_signature_genes_chc23.txt - CHC23 DE 验证的 signature gene 列表
+      └── plots/                                    - CHC23 各类可视化图表（同主分析）
+    results/chc23_validation/                       - 跨切片一致性量化结果目录
+      ├── cross_slice_consistency_report.csv        - 三项一致性指标汇总表
+      ├── signature_gene_overlap_venn.png           - 两切片 Top-N 基因重叠韦恩图
+      ├── celltype_spearman_correlation.png         - 细胞类型比例 Spearman 相关散点图
+      └── gene_overlap_heatmap.png                  - 共同基因表达热图
+    results/spatial_signature_genes_chc23.txt       - CHC23 DE 验证的 signature gene 列表
+
+【主要命令行参数】
+    --chc23-adata            CHC23 AnnData 文件路径
+    --chc20-niche-dir        CHC20 主分析 niche 结果目录
+    --chc23-niche-dir        CHC23 niche 分析输出目录
+    --validation-dir         跨切片一致性量化输出目录
+    --chc23-sig-out          CHC23 DE 验证 signature gene 列表路径
+    --n-neighbors            kNN 邻居数（与主分析保持一致，默认 15）
+    --leiden-resolution      Leiden 聚类分辨率（默认 0.5）
+    --niche-high-quantile    niche_high 分位数阈值（默认 0.80）
+    --top-n-overlap          用于 Jaccard 计算的 Top-N 基因数量（默认 50）
+    --jaccard-threshold      Jaccard 验收阈值（默认 0.4）
+
+【依赖关系】
+    上游：run_preprocessing.py（生成 adata_vis_post_CHC23.h5ad）
+          run_spatial_niche_analysis.py（被本脚本 subprocess 调用，同时需要其输出
+          spatial_niche/ 目录用于 CHC20 参考数据读取）
+    下游：（本脚本为验证终点，结果用于论文图表和一致性报告）
 
 【参考文献】
     - Schürch et al., Cell, 2020 (Cellular Neighborhoods 方法)

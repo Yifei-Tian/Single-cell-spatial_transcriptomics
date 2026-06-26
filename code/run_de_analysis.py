@@ -1,47 +1,69 @@
 """
 ================================================================================
 脚本名称: run_de_analysis.py
-功能概述: 单细胞/空间转录组分析流程 —— 第 3 步：差异表达（DE）分析
+功能概述: 空间转录组差异表达（DE）分析 —— Step 3
 ================================================================================
 
 【整体任务说明】
-    本脚本将空间转录组数据（spot 级别的基因表达矩阵）与共定位（co-localization）
-    标签结合，使用 Wilcoxon 秩和检验找出"共定位阳性 spot"相比于其他 spot 中
-    特异性高表达的基因，最终导出一批 signature genes（空间特征基因）列表。
+    本脚本将空间转录组数据（spot 级别的基因表达矩阵）与分组标签（共定位标签或
+    niche_high 标签）结合，使用 Wilcoxon 秩和检验找出"阳性 spot"相比于其他 spot
+    中特异性高表达的基因，最终导出 signature genes（空间特征基因）列表。
+
+    执行步骤：
+      步骤 1  加载空间 AnnData（adata_vis_post.h5ad），记录基因数和 spot 数；
+      步骤 2  加载共定位/分组标签 CSV，按 spot ID 对齐注入 adata.obs；
+              缺失 spot 的标签自动填充为阴性（0），确保 adata 完整性；
+      步骤 3  准备表达矩阵：
+                - 若指定 layer（默认 "log1p"）存在，直接使用；
+                - 否则对当前 adata.X 执行 normalize_total（目标 10000）+ log1p 兜底；
+      步骤 4  运行 sc.tl.rank_genes_groups（Wilcoxon 秩和检验），
+              对阳性组 vs 其余 spot 进行组间差异分析；
+      步骤 5  自动识别"阳性"类别（通常为 1 或 "1"），兼容 scanpy 多版本的结果格式，
+              提取该组 Top-N 差异基因写入输出文件。
 
 【输入文件】
-    1. adata_vis_post.h5ad       - 经过预处理的空间转录组 AnnData 数据对象
-                                   （包含每个 spot 的基因表达矩阵）
-    2. spot_with_coloc_label.csv - 上一步（空间 niche 分析）产生的共定位标签文件
-                                   （记录每个 spot 是否属于共定位阳性区域）
+    results/adata_vis_post.h5ad       - 经过预处理的空间转录组 AnnData（含基因表达矩阵）
+    results/spot_with_coloc_label.csv - 共定位标签文件（含 spot_id 列 + coloc 标签列）
+                                        也可传入 spatial_niche_scores.csv 并用 --coloc-column niche_high
 
 【输出文件】
-    spatial_signature_genes.txt  - 在共定位阳性区域中特异高表达的基因列表
-                                   （每行一个基因名，默认保留前 50 个）
+    results/spatial_signature_genes.txt - 阳性 spot 特异高表达基因列表
+                                          （每行一个基因名，默认保留前 50 个）
 
 【整体数据流】
-    adata_vis_post.h5ad          spot_with_coloc_label.csv
-      （空间基因表达矩阵）               （每个 spot 的共定位标签）
-            │                                  │
-            └──────────────┬───────────────────┘
+    adata_vis_post.h5ad          spot_with_coloc_label.csv（或 spatial_niche_scores.csv）
+      （空间基因表达矩阵）                  （每个 spot 的分组标签）
+            │                                        │
+            └──────────────┬──────────────────────────┘
                            ▼
-                  注入 coloc 标签到 adata.obs
-                           │
+              注入标签到 adata.obs（缺失 spot 填充阴性）
                            ▼
-               准备 log1p 归一化表达矩阵 (adata.X)
-                           │
+              准备 log1p 归一化表达矩阵（layer 或兜底归一化）
                            ▼
-              Wilcoxon 检验：阳性 spot vs 其他 spot
-                           │
+              Wilcoxon 检验：阳性 spot vs 其余 spot
                            ▼
-               提取 coloc=1 组的 Top-50 差异基因
-                           │
+              提取阳性组 Top-N 差异基因（默认 50 个）
                            ▼
                  spatial_signature_genes.txt
 
+【主要命令行参数】
+    --adata          空间 AnnData 文件路径（默认 results/adata_vis_post.h5ad）
+    --coloc          分组标签 CSV 文件路径（默认 results/spot_with_coloc_label.csv）
+    --out            输出基因列表路径（默认 results/spatial_signature_genes.txt）
+    --top-n          导出前 N 个差异基因（默认 50）
+    --coloc-column   CSV 中分组标签列名（默认 "coloc"，也可指定 "niche_high"）
+    --spot-id-column CSV 中 spot ID 列名（默认 "spot_id"）
+    --layer          使用的 AnnData layer 名称（默认 "log1p"，不存在时自动归一化）
+
 【设计亮点】
-    大量防御性编程：缺失标签填充、layer 兜底归一化、group 名称兼容处理，
+    大量防御性编程：缺失标签填充、layer 兜底归一化、group 名称兼容多版本 scanpy，
     使整个流程在数据不完整或上游格式变化时也能鲁棒地运行。
+
+【依赖关系】
+    上游：run_preprocessing.py（生成 adata_vis_post.h5ad）
+          colocation.py（生成 spot_with_coloc_label.csv）
+          或 run_spatial_niche_analysis.py（生成 spatial_niche_scores.csv）
+    下游：tcga_survival_analysis.R（读取 spatial_signature_genes.txt 进行 ssGSEA 预后分析）
 ================================================================================
 """
 

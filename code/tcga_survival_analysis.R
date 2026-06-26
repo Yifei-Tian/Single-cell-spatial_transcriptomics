@@ -1,14 +1,29 @@
 #!/usr/bin/env Rscript
 
 # ==============================================================================
-# 脚本总览：tcga_survival_analysis.R
+# 脚本名称: tcga_survival_analysis.R
+# 功能概述: TCGA-LIHC 大队列预后验证 —— Step 4-5
 # ==============================================================================
 #
 # 【整体任务】
-#   本脚本是整个分析流程的第 4-5 步，负责将 Python 端（run_spatial_niche_analysis.py）
-#   从空间转录组数据中提炼出的"免疫抑制空间生态位基因签名"，投影到 TCGA-LIHC
-#   （肝细胞癌大队列）的 bulk RNA-seq 数据中，计算每位患者的免疫抑制程度评分，
-#   再结合临床随访数据进行预后分析。
+#   本脚本是整个分析流程的第 4-5 步，将 Python 端提炼出的"免疫抑制空间生态位
+#   基因签名"投影到 TCGA-LIHC（肝细胞癌大队列）的 bulk RNA-seq 数据中，
+#   计算每位患者的免疫抑制程度评分，再结合临床随访数据进行预后分析。
+#
+#   Step 4（ssGSEA 打分）：
+#     - 从 GDC 数据库自动下载 TCGA-LIHC RNA-seq 数据（~370 例患者）；
+#     - 读取 spatial_signature_genes.txt 基因列表作为基因集；
+#     - 使用 GSVA 包的 ssGSEA 方法为每位患者打分；
+#     - 对多个 TCGA barcode 对应同一患者的情况取均值，每人输出一个代表性评分；
+#     - 保存评分结果至 tcga_signature_score.csv。
+#
+#   Step 5（生存分析）：
+#     - 从 GDC 下载 TCGA-LIHC 临床随访数据；
+#     - 构建生存分析所需变量（右删失设计：死亡 = 事件，存活/失访 = 删失）；
+#     - 合并评分与临床数据，按评分中位数将患者分为 High/Low 两组；
+#     - 绘制 Kaplan-Meier 生存曲线图（log-rank 检验）；
+#     - 运行多变量 Cox 比例风险模型（控制年龄和分期混杂因素）；
+#     - 若 HR > 1 且 P < 0.05，说明免疫抑制生态位特征是独立不良预后因子。
 #
 # 【与 Python 分析的衔接关系】
 #   Python 端：
@@ -16,7 +31,7 @@
 #       → Cell2location 反卷积（每个空间 spot 的细胞类型丰度）
 #       → 构建免疫抑制生态位评分（immunosuppressive_niche_score）
 #       → 识别高免疫抑制 spot，比较其与低免疫抑制 spot 的基因差异
-#       → 基于 CHC20 主分析输出 Top-80 上调基因 → results/spatial_signature_genes.txt  ← 关键接口
+#       → 输出 Top-N 上调基因 → results/spatial_signature_genes.txt  ← 关键接口
 #       → CHC23 作为空间验证集，不直接作为 TCGA 投影输入
 #   R 端（本脚本）：
 #     读取 spatial_signature_genes.txt
@@ -25,25 +40,66 @@
 #
 # 【生物学意义】
 #   单细胞/空间转录组样本量极小（通常 2-5 例），发现了"肿瘤实质-Treg-髓系细胞"
-#   共定位的免疫抑制生态位。但结论是否具有普遍性和临床意义，需要在大队列验证。
+#   共定位的免疫抑制生态位。结论是否具有普遍性和临床意义，需要在大队列验证。
 #   TCGA-LIHC 提供了 ~370 例肝癌患者的 bulk RNA-seq + 长期随访数据，
 #   是验证预后意义的金标准队列。
 #   若 Cox 回归显示 HR > 1 且 P < 0.05，说明"免疫抑制生态位特征"在排除年龄、
 #   分期等混杂因素后，仍是独立不良预后因子，具有临床转化价值。
 #
+# 【工具函数索引】
+#   get_script_path()         自适应获取脚本文件绝对路径（兼容 Rscript 和 RStudio）
+#   parse_args()              解析命令行参数，支持 --key value 和 --key=value 两种格式
+#   resolve_path()            将相对路径转换为绝对路径（以项目根目录为基准）
+#   apply_ssl_settings()      可选关闭 HTTPS 证书验证（仅用于特殊网络环境）
+#   classify_gdc_error()      分类 GDC 网络错误（SSL / GDC 服务器 / 其他）
+#   extract_valid_workflows() 从错误信息中提取 GDC 可用 workflow 列表
+#   build_gdc_query()         构建 TCGAbiolinks GDC 数据查询对象
+#   gdc_retry()               带重试和等待的 GDC 接口调用包装器
+#
 # 【输入文件】
-#   results/spatial_signature_genes.txt  — Python 端（run_spatial_niche_analysis.py）输出的
-#                                          免疫抑制生态位特征基因列表（每行一个基因名）
-#   （TCGA-LIHC 数据由脚本通过 TCGAbiolinks 包自动从 GDC 数据库下载，无需本地准备）
-#     · TCGA-LIHC RNA-seq count 矩阵（~370 例患者）
-#     · TCGA-LIHC 临床随访数据（含 OS 时间、生存状态、年龄、分期等）
+#   results/spatial_signature_genes.txt   — Python 端输出的免疫抑制生态位特征基因列表
+#                                           （run_spatial_niche_analysis.py 或 run_de_analysis.py 生成）
+#   （TCGA-LIHC 数据由脚本通过 TCGAbiolinks 包自动从 GDC 数据库下载，无需本地手动准备）
+#     · TCGA-LIHC RNA-seq count 矩阵（~370 例患者，GDC 实时下载）
+#     · TCGA-LIHC 临床随访数据（含 OS 时间、生存状态、年龄、分期等，GDC 实时下载）
 #
 # 【主要输出文件】
-#   results/tcga_signature_score.csv      — 每位患者的 ssGSEA 评分
-#   results/tcga_signature_survival.csv   — 评分 + 临床信息合并表
-#   results/cox_results.txt               — 多变量 Cox 回归摘要
-#   results/km_plot.png                   — Kaplan-Meier 生存曲线图
-#   results/cox_forest_plot.png           — Cox 回归森林图
+#   results/tcga_signature_score.csv       — 每位患者的 ssGSEA 评分（patient_id + score）
+#   results/tcga_signature_survival.csv    — 评分 + 临床信息合并表（用于后续统计分析）
+#   results/cox_results.txt                — 多变量 Cox 回归模型摘要（HR、CI、P 值）
+#   results/km_plot.png                    — Kaplan-Meier 生存曲线图（High vs Low 组）
+#   results/cox_forest_plot.png            — Cox 回归森林图（各协变量效应展示）
+#
+# 【主要命令行参数】
+#   --project           TCGA 项目标识（默认 TCGA-LIHC）
+#   --workflow          GDC 下载工作流名称（默认 'HTSeq - FPKM'）
+#   --assay             数据矩阵来源（默认 'HTSeq - FPKM'）
+#   --signature         签名基因列表路径（默认 results/spatial_signature_genes.txt）
+#   --out-dir           输出目录（默认 results/）
+#   --score-out         ssGSEA 评分输出文件名（默认 tcga_signature_score.csv）
+#   --merged-out        评分 + 临床合并表文件名（默认 tcga_signature_survival.csv）
+#   --cox-out           Cox 回归摘要文件名（默认 cox_results.txt）
+#   --km-out            KM 曲线图文件名（默认 km_plot.png）
+#   --forest-out        Cox 森林图文件名（默认 cox_forest_plot.png）
+#   --seed              随机数种子（默认 1234）
+#   --gdc-retries       GDC 下载失败重试次数（默认 3）
+#   --gdc-wait          重试等待秒数（默认 5）
+#   --ssl-verify        是否验证 SSL 证书（0=关闭，仅用于特殊网络环境）
+#   --query-rds         缓存的 GDC Query RDS 路径（跳过重新查询）
+#   --min-genes         签名基因中至少有 N 个在 TCGA 数据中存在才继续（默认 5）
+#
+# 【依赖关系】
+#   上游：run_spatial_niche_analysis.py（生成 spatial_signature_genes.txt）
+#         或 run_de_analysis.py（生成同名文件）
+#   下游：（本脚本为分析终点，结果直接用于论文图表和统计报告）
+#
+# 【所需 R 包】
+#   TCGAbiolinks  — 从 GDC 数据库下载 TCGA 数据
+#   GSVA          — ssGSEA 基因集富集打分
+#   survival      — Cox 比例风险模型、KM 曲线核心计算
+#   survminer     — 生存曲线可视化（ggsurvplot、ggforest）
+#   SummarizedExperiment — TCGA 数据容器类（BioConductor 包）
+#   httr          — HTTP 客户端（用于 SSL 配置，可选）
 # ==============================================================================
 
 # ------------------------------------------------------------------------------

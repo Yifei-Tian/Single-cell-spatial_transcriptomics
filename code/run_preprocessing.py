@@ -1,24 +1,33 @@
 """
 ================================================================================
 脚本名称: run_preprocessing.py
-功能概述: 数据预处理与 Cell2location 反卷积 —— Step 1
+功能概述: 数据预处理与 Cell2location 双切片反卷积 —— Step 1
 ================================================================================
 
 【整体任务说明】
-    本脚本执行以下核心步骤：
-      1. 加载 scRNA-seq 参考数据，完成质控与 Treg 亚群注释；
-      2. 绘制横版 Treg 标志基因气泡图（便于比较多个亚聚类）；
-      3. 训练 Cell2location RegressionModel，导出细胞类型参考签名；
-      4. 对 CHC20 Visium 切片运行 Cell2location 空间建模，获得细胞丰度估计；
-      5. 对 CHC23 Visium 切片运行相同流程，生成多切片一致性验证结果；
-      6. 保存反卷积后的 AnnData 和细胞比例表。
+    本脚本是分析流程的 Step 1，串联 preprocessing.py 模块中的所有核心函数，
+    对 CHC20（主分析）和 CHC23（独立验证）两张切片依次完成以下 9 个步骤：
+
+      Step 1  加载 scRNA-seq 参考数据，执行基础质控（过滤低表达细胞/基因）；
+      Step 2  加载 CHC20 / CHC23 Visium 空间数据，保留 is_tissue=1 的有效 spot；
+      Step 3  取 scRNA 与两张 Visium 切片的共享基因子集，确保建模基因空间一致；
+      Step 4  提取 T/NK 细胞亚群，将指定聚类簇（默认 "9" / "9.0"）重注释为 Treg；
+              绘制横版 Treg 标志基因气泡图（dotplot），便于论文并排展示；
+      Step 5  用 CHC20 scRNA-seq 训练 RegressionModel（第一阶段参考签名学习），
+              保存 CHC20 训练曲线图；
+      Step 6  用 CHC20 的参考签名运行 Cell2location 空间建模（第二阶段反卷积），
+              获得每个 spot 的细胞丰度估计，保存主分析结果；
+      Step 7  独立为 CHC23 训练 RegressionModel（采用更保守的早停参数：
+              patience=50, min_delta=5e-5, max_epochs=400，防止过早收敛），
+              并对 CHC23 运行空间建模，生成验证切片结果；
+      Step 8  生成 CHC20 / CHC23 多切片一致性对比图（各细胞类型比例条形图），
+              保存至 results/cross_slice_comparison/；
+      Step 9  保存两张切片各自的 scRNA AnnData 和共享基因列表。
 
 【多切片设计说明】
     CHC20 为主分析切片（用于 Step 2 空间 niche 分析）；
-    CHC23 为独立验证切片，运行相同的 Cell2location 流程后：
-      - 生成相同系列可视化图（细胞类型空间分布、niche 评分分布）；
-      - 与 CHC20 进行关键指标对比（Treg 富集比例、niche_high 占比）；
-      - 验证结论在不同患者/切片间的一致性，增强结果的普适性。
+    CHC23 为独立验证切片（由 run_chc23_validation.py 消费），两者分别独立
+    训练参考签名模型，以排除样本间批次效应对反卷积结果的干扰。
 
 【输入文件】
     data/scRNA_reference.h5ad    - scRNA-seq 参考数据（pre.py 生成）
@@ -28,13 +37,28 @@
                                    或直接读取 data/CHC23_Visium/ Space Ranger 目录
 
 【输出文件】
-    results/adata_vis_post.h5ad       - CHC20 Cell2location 反卷积后的空间 AnnData（主分析输入）
-    results/adata_vis_chc23_post.h5ad - CHC23 Cell2location 反卷积后的空间 AnnData（验证切片）
-    results/spot_cell_proportion.csv  - CHC20 每个 spot 的细胞类型比例表
-    results/spot_cell_proportion_chc23.csv - CHC23 每个 spot 的细胞类型比例表
-    results/figures/treg_bubble.png   - Treg 标志基因横版气泡图
-    results/figures/cell2loc_chc20_*.png  - CHC20 细胞类型空间分布图（各细胞类型一张）
-    results/figures/cell2loc_chc23_*.png  - CHC23 细胞类型空间分布图（各细胞类型一张）
+    results/adata_vis_post.h5ad               - CHC20 反卷积后的空间 AnnData（主分析输入）
+    results/adata_vis_post_CHC20.h5ad         - 同上，带 CHC20 后缀的副本
+    results/adata_vis_post_CHC23.h5ad         - CHC23 反卷积后的空间 AnnData（验证切片）
+    results/adata_sc_post.h5ad                - CHC20 scRNA-seq 参考数据（含后验签名）
+    results/adata_sc_post_CHC20.h5ad          - 同上，带 CHC20 后缀的副本
+    results/adata_sc_post_CHC23.h5ad          - CHC23 scRNA-seq 参考数据（含后验签名）
+    results/spot_cell_proportion_CHC20.csv    - CHC20 每个 spot 的细胞类型比例表
+    results/spot_cell_proportion_CHC23.csv    - CHC23 每个 spot 的细胞类型比例表
+    results/shared_genes_CHC20.txt            - CHC20 scRNA × Visium 共享基因列表
+    results/shared_genes_CHC23.txt            - CHC23 scRNA × Visium 共享基因列表
+    results/regression_training_history_CHC20.png - CHC20 RegressionModel 训练曲线
+    results/regression_training_history_CHC23.png - CHC23 RegressionModel 训练曲线
+    results/treg_bubble.png                   - Treg 标志基因横版气泡图
+    results/t_cell_dotplot.png                - T 细胞聚类气泡图（竖版回退版本）
+    results/cross_slice_comparison/           - 多切片一致性对比图（细胞类型比例）
+    results/run_preprocessing.log            - 全流程运行日志
+
+【依赖关系】
+    上游：pre.py（生成 .h5ad 数据文件）
+    下游：run_spatial_niche_analysis.py（读取 adata_vis_post.h5ad 进行 Niche 分析）
+          run_chc23_validation.py（读取 adata_vis_post_CHC23.h5ad 进行独立验证）
+          colocation.py / run_de_analysis.py（读取细胞比例表和空间数据）
 
 【参考文献】
     - Kleshchevnikov et al., Nature Biotechnology, 2022 (Cell2location)

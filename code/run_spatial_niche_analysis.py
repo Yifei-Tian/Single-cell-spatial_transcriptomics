@@ -1,46 +1,107 @@
 """
 ================================================================================
 脚本名称: run_spatial_niche_analysis.py
-功能概述: 空间免疫抑制生态位（Niche）分析 —— Step 2
+功能概述: 空间免疫抑制生态位（Niche）识别与特征基因提取 —— Step 2
 ================================================================================
 
 【整体任务说明】
-    本脚本基于 Cell2location 反卷积结果，采用"邻域组成聚类 + 功能评分注释"
-    的两阶段策略识别肝癌空间免疫抑制生态位（Schürch et al., Cell, 2020）。
-    具体流程：
-      1. 构建空间邻接图，计算每个 spot 的邻域细胞组成向量（Squidpy 框架）；
-      2. 对邻域组成向量进行 Leiden 无监督聚类，识别 cellular neighborhoods；
-      3. 对每个 neighborhood cluster 计算功能评分（Treg_score、免疫抑制基因
-         模块评分等），将高 Treg、高免疫基质成分的 cluster 注释为目标 niche；
-      4. 对阈值参数进行敏感性分析，验证结果稳定性；
-      5. 提取 niche 特征基因签名，生成多类可视化图表（含 L-R 通讯热图）。
+    本脚本基于 Cell2location 反卷积结果，采用"邻域组成聚类（无监督）+ 功能评分
+    语义注释"的两阶段策略识别肝癌空间免疫抑制生态位（Schürch et al., 2020），
+    完整流程共 15 个步骤：
 
-【niche 识别策略说明（参考 niche修改.md）】
-    - 本脚本将阈值规则（hep_high_quantile、niche_high_quantile 等）降级为
-      "注释/筛选"步骤，而非 niche 发现的第一步；
-    - niche 发现主体改为：空间邻接图 → 邻域组成向量 → Leiden 聚类；
-    - 在 Leiden 聚类结果上叠加功能评分，对 niche 进行语义注释；
-    - 通过敏感性分析（k=10/15/20 邻居，radius_multiplier=1.0/1.25/1.5）
-      验证 niche 分配的稳定性。
+      Step 1   加载反卷积空间 AnnData，提取细胞类型丰度矩阵；
+      Step 2   构建 k-NN 空间邻接图（Squidpy），统计每个 spot 的邻域细胞组成向量；
+      Step 3   对邻域组成向量进行 Leiden 无监督聚类，识别 cellular neighborhoods；
+      Step 4   计算邻域统计量，汇总每个聚类簇的细胞类型均值及 spot 数；
+      Step 5   构建半径邻域矩阵（radius_multiplier 控制范围），
+               计算基于半径的邻域细胞组成向量（为敏感性分析提供第二种邻域定义）；
+      Step 6   计算各 spot 到最近 hep_high spot 的距离（niche 空间边界辅助指标）；
+      Step 7   计算免疫抑制功能基因模块评分（immunosuppressive_gene_score），
+               结合 FOXP3 / IL10 / CTLA4 / TGFB1 / IDO1 等先验基因集；
+      Step 8   计算 L-R 配体-受体通讯强度评分（基于 LR_PAIRS 预设对）；
+      Step 9   多层次评分计算：
+                 - Treg_like_score（Treg 比例 + 免疫抑制基因评分 Z-score 加总）；
+                 - immune_stroma_score（Treg + T/NK + Myeloid + Fibroblast Z-score）；
+                 - immunosuppressive_niche_score（综合五维 Z-score，用于分位数截断）；
+                 - niche_high 标签（score ≥ niche_high_quantile 分位数阈值）；
+      Step 10  辅助空间区域标注（规则化：tumor_core / stroma_immune / tumor_edge / other），
+               仅用于可视化，不参与 niche 发现；
+      Step 11  敏感性分析（v2 连续指标）：
+                 对 kNN 邻居数（k=10/15/20）和 radius_multiplier（1.0/1.25/1.5）
+                 两个维度分别做参数扰动，采用连续性指标衡量 niche 评分稳健性：
+                   · Spearman ρ：衡量全局评分排序的一致性，不受硬截断影响；
+                   · 加权 Jaccard（Continuous Jaccard）：对高分区域天然加权，
+                     ∑min(a,b) / ∑max(a,b)，基于 Min-Max 归一化连续向量计算；
+                 以 k=15 为参考配置，输出 2×2 矩阵图展示两指标在两个参数维度的稳定性；
+      Step 12  保存完整评分表（spatial_niche_scores.csv）和分析参数元数据；
+      Step 13  可视化（共 15+ 张图）：
+                 细胞类型空间分布、综合 niche 评分空间图、Leiden 聚类图、
+                 语义 niche 标签图、辅助区域标注图、距离依赖折线图、
+                 区域评分箱线图、Hepatocyte-Treg 散点图、细胞类型相关性热图、
+                 L-R 通讯热图、敏感性分析稳定性图、niche_high 二值分布图、
+                 聚类法 vs 评分法并排对比图；
+      Step 14  特征基因提取（三层筛选策略）：
+                 Layer 1 - Wilcoxon + BH-FDR 检验（主签名基因，FDR<0.05 & log2FC>0.5）；
+                 Layer 2 - 先验功能基因集 AUC 检验（Treg/TAM/CAF 三组，AUC>0.6）；
+                 Layer 3 - Gini Index 特异性评分（局灶性高表达稀有免疫基因检测）；
+                 同时绘制全基因范围火山图；
+      Step 15  参数扫描稳定性评估（resolution × niche_high_quantile 二维网格搜索），
+               量化不同参数组合下 DEG 列表的 Jaccard 重叠度，生成热图。
+
+【niche 识别策略说明（参考 docs/niche修改.md）】
+    - niche 发现主体：空间邻接图 → 邻域组成向量 → Leiden 无监督聚类；
+    - 阈值规则（hep_high_quantile、niche_high_quantile）仅用于语义注释和签名提取分组；
+    - 双层验证：Leiden 聚类法（无监督）与评分阈值法（规则化）并排可视化对比。
+
+【输入文件】
+    results/adata_vis_post.h5ad     - CHC20 Cell2location 反卷积后的空间 AnnData
+                                      （由 run_preprocessing.py Step 6 生成）
+
+【输出文件】
+    results/spatial_niche/
+      spatial_niche_scores.csv                           - 完整 spot 级别评分表
+      spatial_niche_parameters.csv                       - 分析参数与阈值元数据
+      sensitivity_analysis.csv                           - 敏感性分析结果
+                                                           （含 spearman_rho / weighted_jaccard 两指标）
+      neighborhood_cluster_stats.csv                     - 邻域聚类簇统计信息
+      immunosuppressive_niche_signature_genes_ranked.csv - Layer 1 签名基因排名表
+      immunosuppressive_niche_signature_genes.txt        - 签名基因列表（TCGA 投影接口）
+      prior_gene_set_auc.csv                             - Layer 2 先验基因集 AUC 检验结果
+      gini_score_genes.csv                               - Layer 3 Gini Index 特异性基因
+      param_scan_deg_stability.csv                       - 参数扫描 DEG 稳定性数据
+      plots/
+        spatial_hepatocyte.png                           - Hepatocyte 空间分布图
+        spatial_treg.png                                 - Treg 空间分布图
+        spatial_myeloid.png                              - Myeloid 空间分布图
+        spatial_fibroblast.png                           - Fibroblast 空间分布图
+        spatial_immunosuppressive_niche_score.png        - 综合 niche 评分空间图
+        spatial_neighborhood_clusters.png                - Leiden 邻域聚类空间图
+        spatial_niche_semantic_labels.png                - 语义 niche 标签空间图
+        spatial_region_labels.png                        - 辅助区域标注空间图
+        spatial_niche_high_score_spots.png               - niche_high 二值分布图
+        spatial_niche_cluster_vs_score_comparison.png   - 聚类法 vs 评分法对比图
+        distance_to_hep_high_vs_niche_score.png         - 距离-niche评分折线图
+        region_score_boxplots.png                        - 各区域评分箱线图
+        hepatocyte_vs_treg_niche_score.png               - Hepatocyte-Treg 散点图
+        celltype_niche_correlation.png                   - 细胞类型相关性热图
+        lr_communication_heatmap.png                     - L-R 配体受体通讯热图
+        sensitivity_niche_stability.png                  - 敏感性分析 2×2 指标图
+        niche_signature_volcano.png                      - 全基因火山图
+        param_scan_deg_stability_heatmap.png             - 参数扫描稳定性热图
+    results/spatial_signature_genes.txt                  - 签名基因（TCGA 投影用途）
+
+【依赖关系】
+    上游：run_preprocessing.py（生成 adata_vis_post.h5ad）
+    下游：run_chc23_validation.py（读取 spatial_niche/ 进行跨切片验证）
+          run_de_analysis.py（读取 spatial_niche_scores.csv 进行 DE 分析）
+          tcga_survival_analysis.R（读取 spatial_signature_genes.txt 进行 ssGSEA 预后分析）
 
 【参考文献】
     - Schürch et al., Cell, 2020 (cellular neighborhoods 核心方法)
     - Palla et al., Nature Methods, 2022 (Squidpy 空间分析框架)
     - Keren et al., Cell, 2018 (肿瘤-免疫空间结构分型)
-
-【输入文件】
-    adata_vis_post.h5ad   - CHC20 主分析的 Cell2location 反卷积空间数据
-                            （CHC23 为独立验证输出，默认不进入 niche 发现）
-
-【输出文件】
-    spatial_niche/
-      spatial_niche_scores.csv                         - 完整评分表
-      spatial_niche_parameters.csv                     - 分析参数与元数据
-      sensitivity_analysis.csv                         - 敏感性分析结果
-      neighborhood_cluster_stats.csv                   - 邻域聚类统计
-      immunosuppressive_niche_signature_genes_ranked.csv - 排名后签名基因表
-      immunosuppressive_niche_signature_genes.txt      - 签名基因列表
-      plots/                                           - 各类可视化图表
+    - Spearman, 1904 (秩相关系数)
+    - Jaccard, 1912 (Jaccard 相似度；本脚本采用连续加权版本)
 ================================================================================
 """
 from __future__ import annotations
@@ -611,18 +672,36 @@ def _sensitivity_analysis(
     ref_k: int = 15,
 ) -> pd.DataFrame:
     """
-    对邻域参数进行敏感性分析，评估 niche 高分区域的 spot 选择稳定性。
+    对邻域参数进行敏感性分析，评估 niche 评分分布的连续稳定性。
 
-    【改进说明】
-    原版本使用固定分位数阈值（如 80%）切割 niche_high，导致所有参数设置下
-    n_niche_high 永远等于 0.2 × n_spots，无法区分参数优劣。
+    【改进说明 v2 — 2026-06-26】
+    v1 版本改用 Jaccard 相似度（硬截断集合），存在三个根本缺陷：
+      1. Magnitude Loss：只判断是否过 80% 阈值，丢失评分绝对量级信息；
+      2. 固定边缘概率：|A|=|B|=n×q 恒成立，分母被死死锁住，Jaccard 变动
+         范围极窄，不反映真实差异；
+      3. 边界极度敏感：阈值边缘处极微小的分数扰动即可导致 Jaccard 大幅跳变，
+         而该变动并非空间模式的实质性变化（硬截断噪声）。
 
-    改进后使用 Jaccard 相似度作为稳定性指标：
-      - 以主分析参数（ref_k，默认 k=15）产生的 niche_high spot 集合为参考；
-      - 对每种其他参数设置，计算其 niche_high 集合与参考集合的 Jaccard 系数：
-          Jaccard = |A ∩ B| / |A ∪ B|
-      - Jaccard > 0.85 说明两种参数选出的空间区域高度重叠，结果稳健；
-      - Jaccard < 0.70 说明参数变化对结果影响较大，需重新审视参数选择。
+    v2 版本改用两个互补的连续型指标，彻底避免硬截断：
+
+      指标一：Spearman 秩相关系数（spearman_rho）
+        - 直接计算参考评分序列与实验评分序列之间所有 spot 排名的相关性；
+        - 保留全部 spot 信息，不受任何截断影响；
+        - 衡量「参数变化是否系统性地改变了 spot 的相对排序」；
+        - 值域 [−1, 1]，越接近 1.0 说明排序越稳定。
+
+      指标二：连续型 Weighted Jaccard（weighted_jaccard）
+        - 先将每个评分向量归一化到 [0, 1]（min-max）；
+        - 计算 Σ min(a_i, b_i) / Σ max(a_i, b_i)；
+        - 对高分 spot 天然赋予更高权重（重点关注高 niche 区域），
+          弥补 Spearman 对顶部区域与底部区域等权重的不足；
+        - 值域 [0, 1]，越接近 1.0 说明评分分布高度相似。
+
+    两指标联合解读：
+      - spearman_rho > 0.95 且 weighted_jaccard > 0.90：结果极稳健；
+      - spearman_rho > 0.90 且 weighted_jaccard > 0.80：结果稳健，参数不敏感；
+      - spearman_rho < 0.85 或 weighted_jaccard < 0.70：参数变化有实质影响，
+        建议重新审视参数选择。
 
     参数
     ----
@@ -634,22 +713,26 @@ def _sensitivity_analysis(
     fibroblast_col          : Fibroblast 比例列名
     n_neighbors_list        : k-NN 邻居数扫描列表
     radius_multiplier_list  : 半径倍增系数扫描列表
-    niche_high_quantile     : 高 niche 区域分位数阈值（用于切割 niche_high 集合）
-    ref_k                   : 参考参数（主分析 kNN k 值，用于计算 Jaccard 的基准集合）
+    niche_high_quantile     : 高 niche 区域分位数阈值（仅用于记录 n_niche_high，
+                              不再作为相似度计算的截断点）
+    ref_k                   : 参考参数（主分析 kNN k 值，作为基准评分向量）
 
     返回
     ----
-    pd.DataFrame，每行为一个参数组合的统计结果，包含 Jaccard 相似度列。
+    pd.DataFrame，每行为一个参数组合的统计结果，包含：
+      param_mode / param_label / is_reference / n_niche_high / niche_pct /
+      spearman_rho / weighted_jaccard / score_std
     """
+    from scipy.stats import spearmanr as _spearmanr
+
     gs = gene_score.reindex(proportions.index).fillna(0.0)
 
-    def _compute_score_and_mask(
+    def _compute_score(
         nbrs: list[np.ndarray],
-    ) -> tuple[pd.Series, pd.Series]:
+    ) -> pd.Series:
         """
-        计算给定邻居列表下的综合 niche 评分及 niche_high 布尔掩码。
-
-        返回 (score, high_mask)：score 为连续值 Series，high_mask 为布尔 Series。
+        计算给定邻居列表下的综合 niche 连续评分（不截断）。
+        返回 score Series，索引与 proportions 一致。
         """
         nc = _compute_neighborhood_composition(proportions, nbrs)
         s = (
@@ -658,18 +741,36 @@ def _sensitivity_analysis(
             + _zscore(nc[fibroblast_col])
             + _zscore(gs)
         )
-        thr = float(s.quantile(niche_high_quantile))
-        mask = s >= thr
-        return s, mask
+        return s
 
-    # ── 计算参考集合（主分析 k=ref_k 的 niche_high mask）────────────────────
+    def _weighted_jaccard(a: np.ndarray, b: np.ndarray) -> float:
+        """
+        计算两个非负连续向量的 Weighted Jaccard 相似度。
+
+        先做 min-max 归一化将值域映射到 [0, 1]，再计算
+          WJ = Σ min(a_i, b_i) / Σ max(a_i, b_i)
+        对高分元素天然赋予更高权重，适合「关注高分区域一致性」的场景。
+        若分母为 0（所有元素均为 0），返回 1.0（视为完全一致）。
+        """
+        def _minmax(v: np.ndarray) -> np.ndarray:
+            lo, hi = v.min(), v.max()
+            return (v - lo) / (hi - lo) if hi > lo else np.zeros_like(v)
+
+        a_n = _minmax(a)
+        b_n = _minmax(b)
+        denom = np.maximum(a_n, b_n).sum()
+        if denom == 0:
+            return 1.0
+        return float(np.minimum(a_n, b_n).sum() / denom)
+
+    # ── 计算参考评分向量（主分析 k=ref_k）────────────────────────────────────
     ref_nbrs = _build_knn_neighbors(coords, k=ref_k)
     try:
-        _, ref_mask = _compute_score_and_mask(ref_nbrs)
-        ref_set = set(proportions.index[ref_mask.to_numpy()])
+        ref_score = _compute_score(ref_nbrs)
+        ref_arr = ref_score.to_numpy(dtype=float)
     except Exception as exc:
-        logging.warning("Could not compute reference mask for k=%d: %s", ref_k, exc)
-        ref_set = set()
+        logging.warning("Could not compute reference score for k=%d: %s", ref_k, exc)
+        ref_arr = None
 
     rows = []
     all_params: list[tuple[str, int | None, float | None]] = (
@@ -688,29 +789,41 @@ def _sensitivity_analysis(
                 label = f"radius×{rm}"
                 is_ref = False
 
-            score, high_mask = _compute_score_and_mask(nbrs)
-            curr_set = set(proportions.index[high_mask.to_numpy()])
+            score = _compute_score(nbrs)
+            curr_arr = score.to_numpy(dtype=float)
 
-            # Jaccard 相似度（与参考集合对比）
-            if ref_set or curr_set:
-                jaccard = len(ref_set & curr_set) / len(ref_set | curr_set)
+            # 连续评分相似度（无硬截断）
+            if ref_arr is not None and len(ref_arr) == len(curr_arr):
+                # 指标一：Spearman 秩相关（全局排序稳定性）
+                rho, _ = _spearmanr(ref_arr, curr_arr)
+                spearman_rho = round(float(rho), 4)
+
+                # 指标二：Weighted Jaccard（高分区域加权重叠度）
+                wj = _weighted_jaccard(ref_arr, curr_arr)
+                weighted_jac = round(wj, 4)
             else:
-                jaccard = 1.0  # 两者均空时视为完全一致
+                spearman_rho = 1.0 if is_ref else float("nan")
+                weighted_jac = 1.0 if is_ref else float("nan")
 
-            n_high = int(high_mask.sum())
+            # 保留 n_niche_high 用于信息记录（不参与相似度计算）
+            thr = float(score.quantile(niche_high_quantile))
+            n_high = int((score >= thr).sum())
             pct = n_high / len(score) * 100
+
             rows.append({
-                "param_mode":    mode,
-                "param_label":   label,
-                "is_reference":  is_ref,
-                "n_niche_high":  n_high,
-                "niche_pct":     pct,
-                "jaccard_vs_ref": round(jaccard, 4),
-                "score_std":     float(score.std()),
+                "param_mode":      mode,
+                "param_label":     label,
+                "is_reference":    is_ref,
+                "n_niche_high":    n_high,
+                "niche_pct":       pct,
+                "spearman_rho":    spearman_rho,
+                "weighted_jaccard": weighted_jac,
+                "score_std":       float(score.std()),
             })
             logging.info(
-                "Sensitivity [%s]: n_high=%d (%.1f%%), Jaccard_vs_ref=%.3f%s",
-                label, n_high, pct, jaccard,
+                "Sensitivity [%s]: n_high=%d (%.1f%%), Spearman_rho=%.4f, "
+                "Weighted_Jaccard=%.4f%s",
+                label, n_high, pct, spearman_rho, weighted_jac,
                 " [REF]" if is_ref else "",
             )
         except Exception as exc:
@@ -1050,68 +1163,121 @@ def _plot_lr_communication(
 
 def _plot_sensitivity(sensitivity_df: pd.DataFrame, path: Path) -> None:
     """
-    绘制敏感性分析结果图：不同参数设置下 niche_high spot 选择的 Jaccard 相似度。
+    绘制敏感性分析结果图（v2）：双指标展示不同参数设置下 niche 评分的连续稳定性。
 
-    【改进说明】
-    原版本绘制各参数下 niche-high spot 占比，因固定分位数阈值导致所有值相同，
-    图表无意义。
+    【改进说明 v2 — 2026-06-26】
+    v1 版本改用了 Jaccard 相似度（硬截断集合指标），但仍存在三个缺陷：
+      1. 只判断是否过阈值，丢失评分量级信息（Magnitude Loss）；
+      2. 固定边缘概率使 Jaccard 变动范围极窄；
+      3. 边界微小扰动引入硬截断噪声。
 
-    新版本绘制各参数下 niche_high 集合与参考集合（k=15）的 Jaccard 相似度：
-      - 上图：k-NN 邻居数（10/15/20）下的 Jaccard
-      - 下图：半径倍增系数（×1.0/1.25/1.5）下的 Jaccard
-    Jaccard 越接近 1.0，说明该参数选出的 spot 与主分析高度一致，结果稳健；
-    Jaccard > 0.85 通常认为参数不敏感（稳健性良好的标准）。
+    v2 版本改用两个连续型指标，彻底消除硬截断：
+
+      左图组（kNN）/ 右图组（radius）各含两个子图：
+        上子图：Spearman 秩相关系数（全局排序稳定性，权重均匀）
+          - 稳健区间 > 0.90，优秀区间 > 0.95
+        下子图：Weighted Jaccard（高分区域加权重叠度，高分 spot 权重更高）
+          - 稳健区间 > 0.80，优秀区间 > 0.90
+
+    红色柱 = 参考参数（k=15 kNN）；蓝色柱 = 其他参数。
+    橙色虚线 = 各指标的稳健性阈值；红色虚线 = 参考值（=1.0）。
     """
     if sensitivity_df.empty:
         return
 
-    # 兼容新旧列名（旧列 niche_pct，新列 jaccard_vs_ref）
-    has_jaccard = "jaccard_vs_ref" in sensitivity_df.columns
-    y_col   = "jaccard_vs_ref" if has_jaccard else "niche_pct"
-    y_label = "Jaccard similarity vs reference (k=15)" if has_jaccard else "Niche-High Spots (%)"
-    y_max   = 1.05 if has_jaccard else None
+    has_spearman = "spearman_rho" in sensitivity_df.columns
+    has_wj       = "weighted_jaccard" in sensitivity_df.columns
 
-    fig, axes = plt.subplots(1, 2, figsize=(10, 4))
-    for ax, mode, title_str in zip(
-        axes,
-        ["knn",   "radius"],
-        ["kNN Neighbor Count (k) Sensitivity\n(Jaccard vs reference k=15)",
-         "Radius Multiplier Sensitivity\n(Jaccard vs reference k=15)"],
-    ):
+    # 若列名为旧版（jaccard_vs_ref），退化为单指标兼容模式
+    if not has_spearman and not has_wj:
+        legacy_col = "jaccard_vs_ref" if "jaccard_vs_ref" in sensitivity_df.columns else "niche_pct"
+        fig, axes = plt.subplots(1, 2, figsize=(10, 4))
+        for ax, mode in zip(axes, ["knn", "radius"]):
+            sub = sensitivity_df[sensitivity_df["param_mode"] == mode].copy()
+            if sub.empty:
+                ax.set_visible(False)
+                continue
+            colors = ["#d62728" if bool(r.get("is_reference", False)) else "#5b9bd5"
+                      for _, r in sub.iterrows()]
+            ax.bar(sub["param_label"], sub[legacy_col], color=colors, edgecolor="none")
+            ax.set_xlabel("Parameter Setting")
+            ax.set_ylabel(legacy_col)
+            ax.tick_params(axis="x", rotation=20)
+        fig.suptitle("Sensitivity Analysis (legacy mode)", fontsize=10)
+        fig.tight_layout()
+        fig.savefig(path, dpi=180)
+        plt.close(fig)
+        return
+
+    # ── 主绘图逻辑：2×2 布局（kNN 左列 / radius 右列；Spearman 上行 / WJ 下行）──
+    fig, axes = plt.subplots(2, 2, figsize=(12, 8))
+
+    mode_list  = ["knn", "radius"]
+    mode_title = ["kNN Neighbor Count (k)", "Radius Multiplier"]
+
+    metric_list  = ["spearman_rho", "weighted_jaccard"]
+    metric_label = [
+        "Spearman ρ (rank correlation vs ref k=15)",
+        "Weighted Jaccard (score overlap vs ref k=15)",
+    ]
+    metric_thresh = [0.90, 0.80]   # 各指标稳健性阈值
+    metric_colors_ok = ["#1a9641", "#1a9641"]  # 阈值线颜色
+
+    for col_idx, (mode, mtitle) in enumerate(zip(mode_list, mode_title)):
         sub = sensitivity_df[sensitivity_df["param_mode"] == mode].copy()
-        if sub.empty:
-            ax.set_visible(False)
-            continue
 
-        # 参考点（主分析参数）用不同颜色标注
-        colors = []
-        for _, row in sub.iterrows():
-            is_ref = bool(row.get("is_reference", False))
-            colors.append("#d62728" if is_ref else "#5b9bd5")
+        for row_idx, (metric, ylabel, thresh) in enumerate(
+            zip(metric_list, metric_label, metric_thresh)
+        ):
+            ax = axes[row_idx, col_idx]
 
-        ax.bar(sub["param_label"], sub[y_col], color=colors, edgecolor="none")
-        ax.set_xlabel("Parameter Setting")
-        ax.set_ylabel(y_label)
-        ax.set_title(title_str, fontsize=9)
-        ax.tick_params(axis="x", rotation=20)
-        if y_max is not None:
-            ax.set_ylim(0, y_max)
+            if sub.empty or metric not in sub.columns:
+                ax.set_visible(False)
+                continue
 
-        # 标注 Jaccard=0.85 的稳健性参考线
-        if has_jaccard:
-            ax.axhline(0.85, color="orange", linestyle="--", linewidth=1,
-                       label="threshold=0.85")
-            ax.axhline(1.0,  color="red",    linestyle="--", linewidth=0.8,
-                       label="reference (k=15)", alpha=0.6)
+            # 参考参数用红色高亮
+            colors = [
+                "#d62728" if bool(r.get("is_reference", False)) else "#5b9bd5"
+                for _, r in sub.iterrows()
+            ]
+
+            bars = ax.bar(
+                sub["param_label"], sub[metric],
+                color=colors, edgecolor="none", width=0.5,
+            )
+
+            # 在柱顶标注数值
+            for bar, (_, row) in zip(bars, sub.iterrows()):
+                val = row[metric]
+                if not np.isnan(val):
+                    ax.text(
+                        bar.get_x() + bar.get_width() / 2,
+                        bar.get_height() + 0.005,
+                        f"{val:.3f}",
+                        ha="center", va="bottom", fontsize=8,
+                    )
+
+            # 稳健性阈值线
+            ax.axhline(thresh, color="orange", linestyle="--",
+                       linewidth=1.2, label=f"threshold={thresh}")
+            # 参考值线（=1.0）
+            ax.axhline(1.0, color="#d62728", linestyle="--",
+                       linewidth=0.8, alpha=0.5, label="ref (k=15) = 1.0")
+
+            ax.set_ylim(max(0, sub[metric].min() - 0.1), 1.05)
+            ax.set_xlabel("Parameter Setting", fontsize=8)
+            ax.set_ylabel(ylabel, fontsize=8)
+            ax.set_title(f"{mtitle}\n({metric})", fontsize=9)
+            ax.tick_params(axis="x", rotation=20, labelsize=8)
             ax.legend(fontsize=7, frameon=False)
 
     fig.suptitle(
-        "Sensitivity Analysis: Niche Spot Selection Stability\n"
-        "(Jaccard similarity to reference k=15; red bar = reference parameter)",
-        fontsize=10,
+        "Sensitivity Analysis: Niche Score Stability Under Parameter Variation\n"
+        "(Continuous metrics — no hard thresholding; red bar = reference k=15)",
+        fontsize=11,
     )
     fig.tight_layout()
-    fig.savefig(path, dpi=180)
+    fig.savefig(path, dpi=180, bbox_inches="tight")
     plt.close(fig)
 
 
