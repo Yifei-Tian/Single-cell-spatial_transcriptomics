@@ -1,43 +1,11 @@
 # 需求文档
 
-修改代码，并根据修改内容完成代码文件最前面的介绍文字。
+修改并重新整理代码，并根据修改内容完成代码文件最前面的介绍文字。
 
-1. 对于run_spatial_niche_analysis.py 中step 15中生成的表格是这样的， resolution	quantile	n_clusters	n_sig_deg	mean_log2fc_topN	top_genes_str 0.3	0.7	10	16	0.4328	COMP;REG3A;IGKC;AEBP1;FLNA;S100A6;TAGLN;COL1A1;COL1A2;DCN;SFRP4;BGN;THBS2;REG1A;S100A11;COL3A1;MYL9;TIMP3;MGP;PRELP 0.3	0.75	10	21	0.4326	COMP;REG3A;IGKC;AEBP1;TAGLN;FLNA;S100A6;COL1A1;BGN;COL1A2;SFRP4;REG1A;DCN;S100A11;TIMP3;THBS2;ISLR;PRELP;COL3A1;MIF 0.3	0.8	10	24	0.4512	COMP;IGKC;REG3A;AEBP1;TAGLN;S100A6;COL1A1;FLNA;BGN;REG1A;SFRP4;DCN;ISLR;COL1A2;S100A11;TIMP3;MIF;IGLC2;PRELP;ENG 0.3	0.85	10	27	0.4811	COMP;IGKC;REG3A;AEBP1;REG1A;TAGLN;S100A6;COL1A1;BGN;DCN;FLNA;ISLR;SFRP4;IGLC2;S100A11;HTRA3;COL1A2;MIF;PRELP;TIMP3 0.4	0.7	9	16	0.4328	COMP;REG3A;IGKC;AEBP1;FLNA;S100A6;TAGLN;COL1A1;COL1A2;DCN;SFRP4;BGN;THBS2;REG1A;S100A11;COL3A1;MYL9;TIMP3;MGP;PRELP 0.4	0.75	9	21	0.4326	COMP;REG3A;IGKC;AEBP1;TAGLN;FLNA;S100A6;COL1A1;BGN;COL1A2;SFRP4;REG1A;DCN;S100A11;TIMP3;THBS2;ISLR;PRELP;COL3A1;MIF 0.4	0.8	9	24	0.4512	COMP;IGKC;REG3A;AEBP1;TAGLN;S100A6;COL1A1;FLNA;BGN;REG1A;SFRP4;DCN;ISLR;COL1A2;S100A11;TIMP3;MIF;IGLC2;PRELP;ENG 0.4	0.85	9	27	0.4811	COMP;IGKC;REG3A;AEBP1;REG1A;TAGLN;S100A6;COL1A1;BGN;DCN;FLNA;ISLR;SFRP4;IGLC2;S100A11;HTRA3;COL1A2;MIF;PRELP;TIMP3 0.5	0.7	11	16	0.4328	COMP;REG3A;IGKC;AEBP1;FLNA;S100A6;TAGLN;COL1A1;COL1A2;DCN;SFRP4;BGN;THBS2;REG1A;S100A11;COL3A1;MYL9;TIMP3;MGP;PRELP 0.5	0.75	11	21	0.4326	COMP;REG3A;IGKC;AEBP1;TAGLN;FLNA;S100A6;COL1A1;BGN;COL1A2;SFRP4;REG1A;DCN;S100A11;TIMP3;THBS2;ISLR;PRELP;COL3A1;MIF 0.5	0.8	11	24	0.4512	COMP;IGKC;REG3A;AEBP1;TAGLN;S100A6;COL1A1;FLNA;BGN;REG1A;SFRP4;DCN;ISLR;COL1A2;S100A11;TIMP3;MIF;IGLC2;PRELP;ENG 0.5	0.85	11	27	0.4811	COMP;IGKC;REG3A;AEBP1;REG1A;TAGLN;S100A6;COL1A1;BGN;DCN;FLNA;ISLR;SFRP4;IGLC2;S100A11;HTRA3;COL1A2;MIF;PRELP;TIMP3 0.6	0.7	13	16	0.4328	COMP;REG3A;IGKC;AEBP1;FLNA;S100A6;TAGLN;COL1A1;COL1A2;DCN;SFRP4;BGN;THBS2;REG1A;S100A11;COL3A1;MYL9;TIMP3;MGP;PRELP 0.6	0.75	13	21	0.4326	COMP;REG3A;IGKC;AEBP1;TAGLN;FLNA;S100A6;COL1A1;BGN;COL1A2;SFRP4;REG1A;DCN;S100A11;TIMP3;THBS2;ISLR;PRELP;COL3A1;MIF 0.6	0.8	13	24	0.4512	COMP;IGKC;REG3A;AEBP1;TAGLN;S100A6;COL1A1;FLNA;BGN;REG1A;SFRP4;DCN;ISLR;COL1A2;S100A11;TIMP3;MIF;IGLC2;PRELP;ENG 0.6	0.85	13	27	0.4811	COMP;IGKC;REG3A;AEBP1;REG1A;TAGLN;S100A6;COL1A1;BGN;DCN;FLNA;ISLR;SFRP4;IGLC2;S100A11;HTRA3;COL1A2;MIF;PRELP;TIMP3 0.7	0.7	16	16	0.4328	COMP;REG3A;IGKC;AEBP1;FLNA;S100A6;TAGLN;COL1A1;COL1A2;DCN;SFRP4;BGN;THBS2;REG1A;S100A11;COL3A1;MYL9;TIMP3;MGP;PRELP 0.7	0.75	16	21	0.4326	COMP;REG3A;IGKC;AEBP1;TAGLN;FLNA;S100A6;COL1A1;BGN;COL1A2;SFRP4;REG1A;DCN;S100A11;TIMP3;THBS2;ISLR;PRELP;COL3A1;MIF 0.7	0.8	16	24	0.4512	COMP;IGKC;REG3A;AEBP1;TAGLN;S100A6;COL1A1;FLNA;BGN;REG1A;SFRP4;DCN;ISLR;COL1A2;S100A11;TIMP3;MIF;IGLC2;PRELP;ENG 0.7	0.85	16	27	0.4811	COMP;IGKC;REG3A;AEBP1;REG1A;TAGLN;S100A6;COL1A1;BGN;DCN;FLNA;ISLR;SFRP4;IGLC2;S100A11;HTRA3;COL1A2;MIF;PRELP;TIMP3 生成的热图每一列（leiden resolution）没有什么区别, 都是同一个值，检查哪里有问题，并帮我把 Step 15 改成真正有意义的二维扫描。通常有两种修法：
-   1. 用 `resolution` 决定的 niche cluster 去定义 high/low 组，再做 DEG。
-   2. 保留 score-based DEG，但把纵轴改成真正影响 score 的参数，例如 `k` 或 `radius_multiplier`，而不是 `resolution`。
+我选择了两个新的空间转录组数据，分别是在data/HCC4R文件夹和data/HCC6NR文件夹中，这两个文件夹中的数据结构与之前使用的chc20和chc23相同。目前我的CHC23空间转录组数据验证效果不太好，CHC20数据的分析结果也不算太好，需要你帮我重构代码，为HCC4R和HCC6NR这两组数据进行chc20的分析过程，验证一下这两组数据的分析效果。
+要求：
 
-2. 在 run_spatial_niche_analysis.py 生成的 Gini Index 特异性评分我并没有在生成的result中找到这个文件，重新检查修改代码。
-
-   **文件路径：** `results/spatial_niche/gini_score_genes.csv`
-
-   ##### 原理
-
-   Gini Index（基尼系数）衡量数值分布的不均匀性：
-
-   - Gini = 0：所有 spot 中表达量完全均等
-   - Gini = 1：仅一个 spot 中有表达量，其余为 0
-
-   **高 Gini + niche_high 中有局灶性高表达 = 免疫抑制 niche 中高度特异的稀有基因**（如 FOXP3 集中在 Treg 密集区域的少数 spot）
-
-   ##### CSV 列说明
-
-   | 列名        | 含义                                      |
-   | ----------- | ----------------------------------------- |
-   | `gene`      | 基因名                                    |
-   | `gini`      | Gini 系数（在 niche_high spot 中计算）    |
-   | `log2_fc`   | log2 倍数变化（仅保留 log2FC > 0 的基因） |
-   | `mean_high` | niche_high spot 中的均值表达量            |
-
-   - 文件按 `gini` 降序排列，最顶部为最局灶性表达的基因
-   - 仅包含 `gini > 0.5` 且 `log2FC > 0` 的基因（避免非特异性高表达基因）
-
-   ##### 三层方案联合解读建议
-
-   | 分类                    | 条件                                        |
-   | ----------------------- | ------------------------------------------- |
-   | **核心 signature 基因** | 三层均命中（FDR<0.05 + AUC>0.6 + Gini>0.5） |
-   | **强候选基因**          | 任意两层命中                                |
-   | **弱候选基因**          | 仅一层命中，需独立验证                      |
-
-
-3. 根据修改内容重新修改代码文件前面的说明文字。
+1. 每组数据运行结果保存在不同文件夹中，方便分类查看
+2. 运行不同数据时非常方便，不需要修改很多地方（或者直接不需要修改，只要运行不同的代码文件就可以）
+3. 将code中目前的代码文件重新整理到子文件夹中
+4. 在readme中更新修改后的代码结构，以及运行教程
