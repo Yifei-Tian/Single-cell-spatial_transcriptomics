@@ -2,64 +2,42 @@
 
 修改代码，并根据修改内容完成代码文件最前面的介绍文字。
 
-1. ### 对于你之前完成的修改
+1. 对于run_spatial_niche_analysis.py 中step 15中生成的表格是这样的， resolution	quantile	n_clusters	n_sig_deg	mean_log2fc_topN	top_genes_str 0.3	0.7	10	16	0.4328	COMP;REG3A;IGKC;AEBP1;FLNA;S100A6;TAGLN;COL1A1;COL1A2;DCN;SFRP4;BGN;THBS2;REG1A;S100A11;COL3A1;MYL9;TIMP3;MGP;PRELP 0.3	0.75	10	21	0.4326	COMP;REG3A;IGKC;AEBP1;TAGLN;FLNA;S100A6;COL1A1;BGN;COL1A2;SFRP4;REG1A;DCN;S100A11;TIMP3;THBS2;ISLR;PRELP;COL3A1;MIF 0.3	0.8	10	24	0.4512	COMP;IGKC;REG3A;AEBP1;TAGLN;S100A6;COL1A1;FLNA;BGN;REG1A;SFRP4;DCN;ISLR;COL1A2;S100A11;TIMP3;MIF;IGLC2;PRELP;ENG 0.3	0.85	10	27	0.4811	COMP;IGKC;REG3A;AEBP1;REG1A;TAGLN;S100A6;COL1A1;BGN;DCN;FLNA;ISLR;SFRP4;IGLC2;S100A11;HTRA3;COL1A2;MIF;PRELP;TIMP3 0.4	0.7	9	16	0.4328	COMP;REG3A;IGKC;AEBP1;FLNA;S100A6;TAGLN;COL1A1;COL1A2;DCN;SFRP4;BGN;THBS2;REG1A;S100A11;COL3A1;MYL9;TIMP3;MGP;PRELP 0.4	0.75	9	21	0.4326	COMP;REG3A;IGKC;AEBP1;TAGLN;FLNA;S100A6;COL1A1;BGN;COL1A2;SFRP4;REG1A;DCN;S100A11;TIMP3;THBS2;ISLR;PRELP;COL3A1;MIF 0.4	0.8	9	24	0.4512	COMP;IGKC;REG3A;AEBP1;TAGLN;S100A6;COL1A1;FLNA;BGN;REG1A;SFRP4;DCN;ISLR;COL1A2;S100A11;TIMP3;MIF;IGLC2;PRELP;ENG 0.4	0.85	9	27	0.4811	COMP;IGKC;REG3A;AEBP1;REG1A;TAGLN;S100A6;COL1A1;BGN;DCN;FLNA;ISLR;SFRP4;IGLC2;S100A11;HTRA3;COL1A2;MIF;PRELP;TIMP3 0.5	0.7	11	16	0.4328	COMP;REG3A;IGKC;AEBP1;FLNA;S100A6;TAGLN;COL1A1;COL1A2;DCN;SFRP4;BGN;THBS2;REG1A;S100A11;COL3A1;MYL9;TIMP3;MGP;PRELP 0.5	0.75	11	21	0.4326	COMP;REG3A;IGKC;AEBP1;TAGLN;FLNA;S100A6;COL1A1;BGN;COL1A2;SFRP4;REG1A;DCN;S100A11;TIMP3;THBS2;ISLR;PRELP;COL3A1;MIF 0.5	0.8	11	24	0.4512	COMP;IGKC;REG3A;AEBP1;TAGLN;S100A6;COL1A1;FLNA;BGN;REG1A;SFRP4;DCN;ISLR;COL1A2;S100A11;TIMP3;MIF;IGLC2;PRELP;ENG 0.5	0.85	11	27	0.4811	COMP;IGKC;REG3A;AEBP1;REG1A;TAGLN;S100A6;COL1A1;BGN;DCN;FLNA;ISLR;SFRP4;IGLC2;S100A11;HTRA3;COL1A2;MIF;PRELP;TIMP3 0.6	0.7	13	16	0.4328	COMP;REG3A;IGKC;AEBP1;FLNA;S100A6;TAGLN;COL1A1;COL1A2;DCN;SFRP4;BGN;THBS2;REG1A;S100A11;COL3A1;MYL9;TIMP3;MGP;PRELP 0.6	0.75	13	21	0.4326	COMP;REG3A;IGKC;AEBP1;TAGLN;FLNA;S100A6;COL1A1;BGN;COL1A2;SFRP4;REG1A;DCN;S100A11;TIMP3;THBS2;ISLR;PRELP;COL3A1;MIF 0.6	0.8	13	24	0.4512	COMP;IGKC;REG3A;AEBP1;TAGLN;S100A6;COL1A1;FLNA;BGN;REG1A;SFRP4;DCN;ISLR;COL1A2;S100A11;TIMP3;MIF;IGLC2;PRELP;ENG 0.6	0.85	13	27	0.4811	COMP;IGKC;REG3A;AEBP1;REG1A;TAGLN;S100A6;COL1A1;BGN;DCN;FLNA;ISLR;SFRP4;IGLC2;S100A11;HTRA3;COL1A2;MIF;PRELP;TIMP3 0.7	0.7	16	16	0.4328	COMP;REG3A;IGKC;AEBP1;FLNA;S100A6;TAGLN;COL1A1;COL1A2;DCN;SFRP4;BGN;THBS2;REG1A;S100A11;COL3A1;MYL9;TIMP3;MGP;PRELP 0.7	0.75	16	21	0.4326	COMP;REG3A;IGKC;AEBP1;TAGLN;FLNA;S100A6;COL1A1;BGN;COL1A2;SFRP4;REG1A;DCN;S100A11;TIMP3;THBS2;ISLR;PRELP;COL3A1;MIF 0.7	0.8	16	24	0.4512	COMP;IGKC;REG3A;AEBP1;TAGLN;S100A6;COL1A1;FLNA;BGN;REG1A;SFRP4;DCN;ISLR;COL1A2;S100A11;TIMP3;MIF;IGLC2;PRELP;ENG 0.7	0.85	16	27	0.4811	COMP;IGKC;REG3A;AEBP1;REG1A;TAGLN;S100A6;COL1A1;BGN;DCN;FLNA;ISLR;SFRP4;IGLC2;S100A11;HTRA3;COL1A2;MIF;PRELP;TIMP3 生成的热图每一列（leiden resolution）没有什么区别, 都是同一个值，检查哪里有问题，并帮我把 Step 15 改成真正有意义的二维扫描。通常有两种修法：
+   1. 用 `resolution` 决定的 niche cluster 去定义 high/low 组，再做 DEG。
+   2. 保留 score-based DEG，但把纵轴改成真正影响 score 的参数，例如 `k` 或 `radius_multiplier`，而不是 `resolution`。
 
-   Layer 1：Wilcoxon + FDR 主签名基因
+2. 在 run_spatial_niche_analysis.py 生成的 Gini Index 特异性评分我并没有在生成的result中找到这个文件，重新检查修改代码。
 
-   **文件路径：** `results/spatial_niche/immunosuppressive_niche_signature_genes_ranked.csv`（格式升级）
+   **文件路径：** `results/spatial_niche/gini_score_genes.csv`
 
-   ##### 升级内容
+   ##### 原理
 
-   原文件仅有 `gene / mean_high / mean_low / log2_fc` 四列，新版本新增：
+   Gini Index（基尼系数）衡量数值分布的不均匀性：
 
-   | 新增列   | 含义                                                     |
-   | -------- | -------------------------------------------------------- |
-   | `pvalue` | Mann-Whitney U 检验 p 值（单侧，niche_high > niche_low） |
-   | `fdr`    | Benjamini-Hochberg 方法校正后的 FDR                      |
+   - Gini = 0：所有 spot 中表达量完全均等
+   - Gini = 1：仅一个 spot 中有表达量，其余为 0
 
-   ##### 筛选逻辑变化
+   **高 Gini + niche_high 中有局灶性高表达 = 免疫抑制 niche 中高度特异的稀有基因**（如 FOXP3 集中在 Treg 密集区域的少数 spot）
 
-   | 筛选维度   | 原版本        | 新版本                                                 |
-   | ---------- | ------------- | ------------------------------------------------------ |
-   | 统计检验   | 无            | Wilcoxon 秩和检验                                      |
-   | 主筛选条件 | 仅 log2FC > 0 | FDR < 0.05 且 log2FC > 0.5                             |
-   | 补充条件   | 无            | 若严格条件不足 Top-N，放宽至 FDR < 0.2 且 log2FC > 0.3 |
+   ##### CSV 列说明
 
-   ##### 结果解读
+   | 列名        | 含义                                      |
+   | ----------- | ----------------------------------------- |
+   | `gene`      | 基因名                                    |
+   | `gini`      | Gini 系数（在 niche_high spot 中计算）    |
+   | `log2_fc`   | log2 倍数变化（仅保留 log2FC > 0 的基因） |
+   | `mean_high` | niche_high spot 中的均值表达量            |
 
-   - **FDR < 0.05 的基因**：在 niche_high vs niche_low 中表达差异具有统计学显著性，可安全用于报告
-   - **FDR 0.05–0.2 的基因**：有一定差异趋势，作为候选基因，需独立验证
-   - **log2FC 含义**：log2FC = 1 意味着 niche_high 的均值表达量是 niche_low 的 2 倍
+   - 文件按 `gini` 降序排列，最顶部为最局灶性表达的基因
+   - 仅包含 `gini > 0.5` 且 `log2FC > 0` 的基因（避免非特异性高表达基因）
 
-   ---
+   ##### 三层方案联合解读建议
 
-   Layer 1 衍生：火山图
+   | 分类                    | 条件                                        |
+   | ----------------------- | ------------------------------------------- |
+   | **核心 signature 基因** | 三层均命中（FDR<0.05 + AUC>0.6 + Gini>0.5） |
+   | **强候选基因**          | 任意两层命中                                |
+   | **弱候选基因**          | 仅一层命中，需独立验证                      |
 
-   **文件路径：** `results/spatial_niche/plots/niche_signature_volcano.png`
 
-   ##### 图形说明
-
-   - **横轴**：log₂FC（niche_high / niche_low），正值表示 niche_high 中更高表达
-   - **纵轴**：-log₁₀(FDR)，越大表示越显著
-   - **颜色**：
-     - 🔴 红色：显著上调（log2FC > 0.5 且 FDR < 0.05）
-     - 🔵 蓝色：显著下调（log2FC < -0.5 且 FDR < 0.05）
-     - ⚫ 灰色：不显著
-   - **标注**：FOXP3、TGFB1、FAP、CCL22、SPP1 等目标免疫抑制基因会自动标注名称
-   - **虚线**：垂直线 = |log2FC| = 0.5 的阈值；水平线 = FDR = 0.05 的阈值
-
-   ##### 如何使用
-
-   若目标基因（如 FOXP3）出现在右上象限（红色且有标注），说明在空间上有显著的 niche 特异性表达，适合作为免疫抑制 niche 的生物标志物。
-
-   ### 存在问题
-
-   多有基因的p值和fdr都很小，而且目标基因也都没有被选择出来，红色的都不是目标基因 
-
-   ### 需要你完成的任务
-
-   解释一下原因，评估找到最佳解决方法，并完成代码修改。以下是供你借鉴的两个策略：
-
-   **策略一：不要只盯着 FC，结合背景表达率（Fraction of spots）** 比起比较总体平均值，比较目标基因在 niche_high 和 niche_low 中的“检出率（表达该基因的 spot 占比）”往往更具有生物学意义。一个典型的微环境标志物可能是：在 niche_high 中有 40% 的 spot 能检测到表达，而在 niche_low 中只有 5% 能检测到。
-
-   **策略二：剥离混杂因素（结合反卷积结果）** 既然你已经做了 Cell2location 得到了各细胞类型的绝对丰度（Abundance），你可以尝试运行一种“基于细胞类型的”差异分析，而不是直接对比原始 spot count。或者将目标区域的 spot 提取出来，单独查看其中基质细胞/免疫细胞 marker 的表达热图，这比粗暴的全图 Wilcoxon 检验更能说明微环境的特性。
+3. 根据修改内容重新修改代码文件前面的说明文字。
