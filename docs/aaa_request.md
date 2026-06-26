@@ -1,61 +1,65 @@
 # 需求文档
 
-修改代码
+修改代码，并根据修改内容完成代码文件最前面的介绍文字。
 
-1. 目前你给我做了这样的改正
-   run_spatial_niche_analysis.py 新增结果
+1. ### 对于你之前完成的修改
 
-   2.1 敏感性分析（改进版）
+   Layer 1：Wilcoxon + FDR 主签名基因
 
-   **文件路径：** `results/spatial_niche/sensitivity_analysis.csv`  
-   **对应图片：** `results/spatial_niche/plots/sensitivity_niche_stability.png`
+   **文件路径：** `results/spatial_niche/immunosuppressive_niche_signature_genes_ranked.csv`（格式升级）
 
-   #### 问题背景
+   ##### 升级内容
 
-   原版本敏感性分析记录各参数设置下的 `niche_pct`（niche_high spot 占比），但由于使用固定分位数阈值（如 80%）切割 niche_high，导致 `niche_pct` 在所有参数下**永远等于 20%**，图表完全无法区分参数优劣。
+   原文件仅有 `gene / mean_high / mean_low / log2_fc` 四列，新版本新增：
 
-   #### 改进方案
+   | 新增列   | 含义                                                     |
+   | -------- | -------------------------------------------------------- |
+   | `pvalue` | Mann-Whitney U 检验 p 值（单侧，niche_high > niche_low） |
+   | `fdr`    | Benjamini-Hochberg 方法校正后的 FDR                      |
 
-   新版本改用 **Jaccard 相似度** 作为稳定性指标：
+   ##### 筛选逻辑变化
 
-   - 以主分析参数（k=15 kNN）产生的 niche_high spot 集合作为**参考集合**
+   | 筛选维度   | 原版本        | 新版本                                                 |
+   | ---------- | ------------- | ------------------------------------------------------ |
+   | 统计检验   | 无            | Wilcoxon 秩和检验                                      |
+   | 主筛选条件 | 仅 log2FC > 0 | FDR < 0.05 且 log2FC > 0.5                             |
+   | 补充条件   | 无            | 若严格条件不足 Top-N，放宽至 FDR < 0.2 且 log2FC > 0.3 |
 
-   - 对每种其他参数设置，计算其选出的 niche_high 集合与参考集合的 Jaccard 系数：
+   ##### 结果解读
 
-     ```
-     Jaccard = |A ∩ B| / |A ∪ B|
-     ```
+   - **FDR < 0.05 的基因**：在 niche_high vs niche_low 中表达差异具有统计学显著性，可安全用于报告
+   - **FDR 0.05–0.2 的基因**：有一定差异趋势，作为候选基因，需独立验证
+   - **log2FC 含义**：log2FC = 1 意味着 niche_high 的均值表达量是 niche_low 的 2 倍
 
-   #### CSV 文件列说明
+   ---
 
-   | 列名             | 含义                                | 典型值         |
-   | ---------------- | ----------------------------------- | -------------- |
-   | `param_mode`     | 参数类型（`knn` 或 `radius`）       | `knn`          |
-   | `param_label`    | 参数描述                            | `kNN k=10`     |
-   | `is_reference`   | 是否为参考参数（k=15）              | `True`/`False` |
-   | `n_niche_high`   | niche_high spot 数量                | ~500           |
-   | `niche_pct`      | niche_high spot 占比（%)            | ~20.0          |
-   | `jaccard_vs_ref` | 与参考集合（k=15）的 Jaccard 相似度 | 0.72–1.00      |
-   | `score_std`      | niche 评分的标准差                  | 任意正数       |
+   Layer 1 衍生：火山图
 
-   #### 结果解读
+   **文件路径：** `results/spatial_niche/plots/niche_signature_volcano.png`
 
-   | Jaccard 值 | 含义                                             |
-   | ---------- | ------------------------------------------------ |
-   | > 0.85     | 参数选出的空间区域与主分析高度一致，**结果稳健** |
-   | 0.70–0.85  | 有一定差异，可能存在参数依赖性，建议关注         |
-   | < 0.70     | 参数变化对结果影响较大，需重新审视参数选择       |
+   ##### 图形说明
 
-   这个改正内容有如下几个问题
+   - **横轴**：log₂FC（niche_high / niche_low），正值表示 niche_high 中更高表达
+   - **纵轴**：-log₁₀(FDR)，越大表示越显著
+   - **颜色**：
+     - 🔴 红色：显著上调（log2FC > 0.5 且 FDR < 0.05）
+     - 🔵 蓝色：显著下调（log2FC < -0.5 且 FDR < 0.05）
+     - ⚫ 灰色：不显著
+   - **标注**：FOXP3、TGFB1、FAP、CCL22、SPP1 等目标免疫抑制基因会自动标注名称
+   - **虚线**：垂直线 = |log2FC| = 0.5 的阈值；水平线 = FDR = 0.05 的阈值
 
-   1. **损失了连续分布的量级信息 (Magnitude Loss)** Jaccard 是一个无权重的集合指标。它只在乎某个 spot 的评分是否过了 80% 的及格线，完全忽略了评分的绝对大小。
-   2. **固定边缘概率导致的数学降维** 由于通过固定分位数强制使得 $|A| = |B| = 224$，Jaccard 公式的分母被死死限制住了。
-   3. **边界极度敏感 (Threshold Instability)** 处于 80% 阈值边缘的 spot 会引入巨大的随机噪声。如果一个 spot 在参考组排第 224 名，在实验组排第 225 名（由于极其微小的分数扰动），它就会被踢出集合 $B$，从而导致 Jaccard 下降。这种下降并非因为空间模式发生实质性改变，仅仅是因为人为设定的硬截断（Hard Thresholding）。
+   ##### 如何使用
 
-   我有这样几个解决方案，你评估一下是否合理，使用最优的方案修改代码的这个部分
+   若目标基因（如 FOXP3）出现在右上象限（红色且有标注），说明在空间上有显著的 niche 特异性表达，适合作为免疫抑制 niche 的生物标志物。
 
-   方法一：**Spearman 等秩相关系数 (Spearman's Rank Correlation)**：直接计算不同参数下所有 spot Niche 评分排名的相关性。这保留了所有 spot 的信息，不受 80% 截断值的影响。
+   ### 存在问题
 
-   方法二：**连续型 Jaccard (Continuous/Weighted Jaccard)**：如果不截断，而是将每个 spot 的 Niche 评分归一化到 $[0, 1]$ 之间，直接计算连续向量之间的重叠度。
+   多有基因的p值和fdr都很小，而且目标基因也都没有被选择出来，红色的都不是目标基因 
 
-2. 根据目前每个代码文件内容重新修改每个代码文件的开头介绍和总结
+   ### 需要你完成的任务
+
+   解释一下原因，评估找到最佳解决方法，并完成代码修改。以下是供你借鉴的两个策略：
+
+   **策略一：不要只盯着 FC，结合背景表达率（Fraction of spots）** 比起比较总体平均值，比较目标基因在 niche_high 和 niche_low 中的“检出率（表达该基因的 spot 占比）”往往更具有生物学意义。一个典型的微环境标志物可能是：在 niche_high 中有 40% 的 spot 能检测到表达，而在 niche_low 中只有 5% 能检测到。
+
+   **策略二：剥离混杂因素（结合反卷积结果）** 既然你已经做了 Cell2location 得到了各细胞类型的绝对丰度（Abundance），你可以尝试运行一种“基于细胞类型的”差异分析，而不是直接对比原始 spot count。或者将目标区域的 spot 提取出来，单独查看其中基质细胞/免疫细胞 marker 的表达热图，这比粗暴的全图 Wilcoxon 检验更能说明微环境的特性。
