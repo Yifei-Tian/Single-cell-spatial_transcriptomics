@@ -2024,8 +2024,12 @@ def _param_scan_deg_stability(
 
             # 4. Wilcoxon 检验（快速版：仅对 log2FC > 0.3 的基因检验）
             expr = _expression_frame(adata)
-            high_expr = expr.loc[niche_high]
-            low_expr  = expr.loc[~niche_high]
+            # niche_score 的索引来自 proportions，expr 的索引来自 adata.obs_names，
+            # 两者可能不完全一致，必须对齐后再用布尔索引，否则触发
+            # "Unalignable boolean Series" 错误。
+            niche_high_aligned = niche_high.reindex(expr.index).fillna(False).astype(bool)
+            high_expr = expr.loc[niche_high_aligned]
+            low_expr  = expr.loc[~niche_high_aligned]
             mean_h = high_expr.mean()
             mean_l = low_expr.mean()
             lfc = np.log2((mean_h + 1.0) / (mean_l + 1.0))
