@@ -40,11 +40,21 @@
                  区域评分箱线图、Hepatocyte-Treg 散点图、细胞类型相关性热图、
                  L-R 通讯热图、敏感性分析稳定性图、niche_high 二值分布图、
                  聚类法 vs 评分法并排对比图；
-      Step 14  特征基因提取（三层筛选策略）：
-                 Layer 1 - Wilcoxon + BH-FDR 检验（主签名基因，FDR<0.05 & log2FC>0.5）；
-                 Layer 2 - 先验功能基因集 AUC 检验（Treg/TAM/CAF 三组，AUC>0.6）；
+      Step 14  特征基因提取（三层筛选策略 + 检出率双维度评分）：
+                 【问题背景】Visium spot 覆盖 5-50 个细胞，FOXP3 等 Treg 标志基因
+                 因细胞稀释效应在大多数 spot 中表达为 0，导致均值 log2FC 接近 0，
+                 纯 Wilcoxon+FC 策略无法将目标基因选入 Top-N；
+                 【解决方案】引入检出率（Fraction of spots）作为补充维度：
+                   · frac_high / frac_low：各组中检出该基因（表达>0）的 spot 比例；
+                   · delta_frac = frac_high - frac_low：检出率差值；
+                   · composite_score = 0.5×norm(log2FC) + 0.5×norm(delta_frac)：综合排序；
+                 Layer 1 - Wilcoxon + BH-FDR + 综合排序：
+                   筛选条件：FDR<0.05 且（log2FC>0.5 OR delta_frac>0.10）；
+                   输出新列：frac_high / frac_low / delta_frac / composite_score；
+                 Layer 2 - 先验功能基因集 AUC 检验（Treg/TAM/CAF 三组）：
+                   增加 delta_frac 列；AUC>0.6 且 delta_frac>0.05 的先验基因强制合并；
                  Layer 3 - Gini Index 特异性评分（局灶性高表达稀有免疫基因检测）；
-                 同时绘制全基因范围火山图；
+                 绘制火山图（FC vs FDR）+ 检出率散点图（FC vs delta_frac）；
       Step 15  参数扫描稳定性评估（resolution × niche_high_quantile 二维网格搜索），
                量化不同参数组合下 DEG 列表的 Jaccard 重叠度，生成热图。
 
@@ -65,8 +75,13 @@
                                                            （含 spearman_rho / weighted_jaccard 两指标）
       neighborhood_cluster_stats.csv                     - 邻域聚类簇统计信息
       immunosuppressive_niche_signature_genes_ranked.csv - Layer 1 签名基因排名表
+                                                           列：gene / mean_high / mean_low /
+                                                               log2_fc / frac_high / frac_low /
+                                                               delta_frac / composite_score /
+                                                               pvalue / fdr
       immunosuppressive_niche_signature_genes.txt        - 签名基因列表（TCGA 投影接口）
       prior_gene_set_auc.csv                             - Layer 2 先验基因集 AUC 检验结果
+                                                           （含 frac_high / frac_low / delta_frac 列）
       gini_score_genes.csv                               - Layer 3 Gini Index 特异性基因
       param_scan_deg_stability.csv                       - 参数扫描 DEG 稳定性数据
       plots/
@@ -86,7 +101,10 @@
         celltype_niche_correlation.png                   - 细胞类型相关性热图
         lr_communication_heatmap.png                     - L-R 配体受体通讯热图
         sensitivity_niche_stability.png                  - 敏感性分析 2×2 指标图
-        niche_signature_volcano.png                      - 全基因火山图
+        niche_signature_volcano.png                      - 全基因火山图（log2FC vs -log10 FDR）
+        niche_fraction_scatter.png                       - 检出率差值散点图
+                                                           （delta_frac vs log2FC；突出 FOXP3 等
+                                                            稀有免疫基因的 niche 富集，补充火山图）
         param_scan_deg_stability_heatmap.png             - 参数扫描稳定性热图
     results/spatial_signature_genes.txt                  - 签名基因（TCGA 投影用途）
 
@@ -1320,23 +1338,41 @@ def _rank_niche_genes(
     """
     对 niche 高分 spot 进行多维度差异基因分析，筛选特征性高表达基因。
 
-    【升级说明】
-    原版本仅按 log2FC 排序，存在两个缺陷：
-      1. 无统计显著性过滤（均值差异小但假阳性率高）；
-      2. 低表达稀有基因（如 FOXP3）因细胞稀释效应 log2FC 接近 0，
-         永远无法进入 Top-N。
+    【设计背景：为什么 FOXP3 等目标基因不会被 Wilcoxon+FC 选中？】
+    Visium 每个 spot 覆盖 5-50 个细胞，FOXP3、CTLA4 等 Treg 标志基因在绝大多数
+    spot 中表达值为 0（即使该 spot 内确实含有少量 Treg），导致：
+      1. 均值（mean_high / mean_low）均接近 0，log2FC 被稀释至接近 0；
+      2. 两组均为大量 0 值时，Wilcoxon 检验产生大量秩并列，p 值虽小，但排名
+         被高表达的管家/结构基因挤占，目标基因无缘 Top-N；
+      3. 全局 Wilcoxon 将所有 spot 作为对象，无法识别"在少数 spot 中偶发高表达"
+         的稀有免疫细胞标志物。
 
-    升级后采用三层筛选策略，并行运行：
-      Layer 1（Wilcoxon + FDR）：
+    【解决策略：引入检出率（Fraction of spots）作为主要筛选维度】
+    检出率（frac）= 表达量 > 0 的 spot 占各组总数的比例。
+    对于 FOXP3 这类基因：可能在 niche_high 组中有 30% 的 spot 能检出，
+    而在 niche_low 中仅 3% 能检出。这个 delta_frac=0.27 的差异远比均值
+    差异更具生物学意义，且不受稀释效应影响。
+
+    【三层筛选策略（并行运行）】
+      Layer 1（Wilcoxon + FDR + 综合排序）：
         - 对每个基因做 Mann-Whitney U 检验（等价于 Wilcoxon 秩和检验）；
         - 用 Benjamini-Hochberg 方法对 p 值进行 FDR 校正；
-        - 筛选条件：FDR < 0.05 且 log2FC > 0.5（主要 signature gene）
-        - 产出：ranked_wilcoxon_fdr.csv + volcano_plot.png
+        - 新增 frac_high / frac_low / delta_frac（检出率及其差值）；
+        - 综合排序分 = 0.5 × norm(log2FC) + 0.5 × norm(delta_frac)，
+          使低均值但高富集度的基因（如 FOXP3）也能进入 Top-N；
+        - 主筛选条件：FDR < 0.05 且（log2FC > 0.5 OR delta_frac > 0.10）；
+        - 补充条件：若严格条件不足 Top-N，放宽至 FDR < 0.2 且
+                     （log2FC > 0.3 OR delta_frac > 0.05）；
+        - 产出：immunosuppressive_niche_signature_genes_ranked.csv（含新列）
+                + niche_signature_volcano.png（FC vs -log10 FDR 火山图）
+                + niche_fraction_scatter.png（delta_frac vs log2FC 散点图）
 
-      Layer 2（先验功能基因集 AUC）：
+      Layer 2（先验功能基因集 AUC + Fraction 检验）：
         - 对 PRIOR_GENE_SETS 中的三组目标基因（Treg/TAM/CAF）分别做检验；
-        - 报告每个基因的 AUC、p 值（FDR 校正）、均值表达量；
-        - AUC > 0.6 且 FDR < 0.05 视为有意义的 niche 标志基因；
+        - 报告每个基因的 AUC、p 值（FDR 校正）、均值表达量和检出率差值；
+        - AUC > 0.6 且 FDR < 0.05（或 delta_frac > 0.10）视为有意义的
+          niche 标志基因；
+        - 满足条件的先验基因强制合并进 Layer 1 结果（补充入 Top-N）；
         - 产出：prior_gene_set_auc.csv
 
       Layer 3（Gini Index 特异性评分）：
@@ -1345,7 +1381,7 @@ def _rank_niche_genes(
         - 与 log2FC > 0 联合筛选，识别高度特异的稀有免疫基因；
         - 产出：gini_score_genes.csv
 
-    函数本身返回 Layer 1 的结果（兼容原调用方），其余层结果通过额外属性附加
+    函数本身返回 Layer 1 + Layer 2 合并后的结果，其余层结果通过额外属性附加
     到返回 DataFrame 上（df.attrs 字典），供调用方保存。
 
     参数
@@ -1356,8 +1392,10 @@ def _rank_niche_genes(
 
     返回
     ----
-    pd.DataFrame，列：gene / mean_high / mean_low / log2_fc / pvalue / fdr，
-    按 log2_fc 降序（仅 FDR < 0.05 的基因进入前 top_n）。
+    pd.DataFrame，列：
+      gene / mean_high / mean_low / log2_fc / frac_high / frac_low /
+      delta_frac / composite_score / pvalue / fdr
+    按 composite_score 降序（FDR < 0.05 或 delta_frac > 0.10 的基因优先）。
     DataFrame.attrs 额外包含：
       "prior_auc_df" : 先验基因集 AUC 检验结果 DataFrame
       "gini_df"      : Gini Index 评分 DataFrame（niche_high 子集）
@@ -1367,7 +1405,11 @@ def _rank_niche_genes(
 
     if int(high.sum()) < 3 or int((~high).sum()) < 3:
         logging.warning("Too few spots in niche_high/niche_low; skipping signature ranking.")
-        empty = pd.DataFrame(columns=["gene", "mean_high", "mean_low", "log2_fc", "pvalue", "fdr"])
+        empty = pd.DataFrame(columns=[
+            "gene", "mean_high", "mean_low", "log2_fc",
+            "frac_high", "frac_low", "delta_frac",
+            "composite_score", "pvalue", "fdr",
+        ])
         empty.attrs["prior_auc_df"] = pd.DataFrame()
         empty.attrs["gini_df"] = pd.DataFrame()
         return empty
@@ -1377,15 +1419,21 @@ def _rank_niche_genes(
     mean_high = high_expr.mean(axis=0)
     mean_low  = low_expr.mean(axis=0)
 
+    # ── 检出率（Fraction of spots with expression > 0） ──────────────────────
+    # 这是解决稀释效应的核心指标：不依赖均值大小，只看有多少比例的 spot 能"检出"该基因
+    frac_high = (high_expr > 0).mean(axis=0)  # niche_high 组中检出该基因的 spot 比例
+    frac_low  = (low_expr  > 0).mean(axis=0)  # niche_low  组中检出该基因的 spot 比例
+    delta_frac = frac_high - frac_low          # 检出率差值（正值表示 niche_high 中更多 spot 能检出）
+
     # ── Layer 1：log2FC + Wilcoxon + FDR ──────────────────────────────────────
     log2fc = np.log2((mean_high + 1.0) / (mean_low + 1.0))
     pvalues = np.full(len(expr.columns), 1.0)
 
-    # 仅对 log2FC > 0.1 的基因做检验（减少计算量，低 FC 基因无意义）
-    candidate_mask = log2fc.to_numpy() > 0.1
+    # 候选基因：log2FC > 0.1 OR delta_frac > 0.05（兼顾高表达基因和高富集基因）
+    candidate_mask = (log2fc.to_numpy() > 0.1) | (delta_frac.to_numpy() > 0.05)
     candidate_genes = expr.columns[candidate_mask].tolist()
     logging.info(
-        "Running Wilcoxon test on %d candidate genes (log2FC>0.1)...",
+        "Running Wilcoxon test on %d candidate genes (log2FC>0.1 OR delta_frac>0.05)...",
         len(candidate_genes),
     )
     for i, gene in enumerate(candidate_genes):
@@ -1402,26 +1450,49 @@ def _rank_niche_genes(
 
     _, fdr, _, _ = multipletests(pvalues, method="fdr_bh")
 
+    # ── 综合排序分（composite_score）─────────────────────────────────────────
+    # 同时考虑 log2FC（表达量倍数差异）和 delta_frac（检出率差异），
+    # 使 FOXP3 等低表达但高富集的基因也能获得合理排名。
+    # Min-Max 归一化到 [0, 1] 再各赋 0.5 权重。
+    log2fc_arr     = log2fc.to_numpy()
+    delta_frac_arr = delta_frac.to_numpy()
+
+    def _minmax_norm(v: np.ndarray) -> np.ndarray:
+        lo, hi = v.min(), v.max()
+        return (v - lo) / (hi - lo + 1e-12)
+
+    composite = 0.5 * _minmax_norm(log2fc_arr) + 0.5 * _minmax_norm(delta_frac_arr)
+
     ranked = pd.DataFrame({
-        "gene":      expr.columns.tolist(),
-        "mean_high": mean_high.to_numpy(),
-        "mean_low":  mean_low.to_numpy(),
-        "log2_fc":   log2fc.to_numpy(),
-        "pvalue":    pvalues,
-        "fdr":       fdr,
+        "gene":            expr.columns.tolist(),
+        "mean_high":       mean_high.to_numpy(),
+        "mean_low":        mean_low.to_numpy(),
+        "log2_fc":         log2fc_arr,
+        "frac_high":       frac_high.to_numpy(),
+        "frac_low":        frac_low.to_numpy(),
+        "delta_frac":      delta_frac_arr,
+        "composite_score": composite,
+        "pvalue":          pvalues,
+        "fdr":             fdr,
     })
 
-    # 主签名基因：FDR < 0.05 且 log2FC > 0.5
-    sig_ranked = ranked[(ranked["fdr"] < 0.05) & (ranked["log2_fc"] > 0.5)]
-    sig_ranked = sig_ranked.sort_values("log2_fc", ascending=False)
+    # 主签名基因：FDR < 0.05 且（log2FC > 0.5 OR delta_frac > 0.10）
+    sig_strict = ranked[
+        (ranked["fdr"] < 0.05) &
+        ((ranked["log2_fc"] > 0.5) | (ranked["delta_frac"] > 0.10))
+    ]
+    sig_strict = sig_strict.sort_values("composite_score", ascending=False)
 
-    # 若严格条件下不足 top_n，宽松放行 FDR < 0.2 的基因补足
-    if len(sig_ranked) < top_n:
-        loose = ranked[(ranked["fdr"] < 0.2) & (ranked["log2_fc"] > 0.3)]
-        loose = loose.sort_values("log2_fc", ascending=False)
-        sig_ranked = pd.concat([sig_ranked, loose]).drop_duplicates("gene")
+    # 若严格条件下不足 top_n，放宽至 FDR < 0.2 且（log2FC > 0.3 OR delta_frac > 0.05）
+    if len(sig_strict) < top_n:
+        loose = ranked[
+            (ranked["fdr"] < 0.2) &
+            ((ranked["log2_fc"] > 0.3) | (ranked["delta_frac"] > 0.05))
+        ]
+        loose = loose.sort_values("composite_score", ascending=False)
+        sig_strict = pd.concat([sig_strict, loose]).drop_duplicates("gene")
 
-    result = sig_ranked.head(top_n).reset_index(drop=True)
+    result = sig_strict.head(top_n).reset_index(drop=True)
 
     # ── Layer 2：先验功能基因集 AUC 检验 ──────────────────────────────────────
     prior_rows = []
@@ -1448,6 +1519,11 @@ def _rank_niche_genes(
             except Exception:
                 stat, p, auc = 0.0, 1.0, 0.5
 
+            # 检出率：该先验基因在两组 spot 中的表达检出率及差值
+            frac_h = float((h_vals > 0).mean())
+            frac_l = float((l_vals > 0).mean())
+            d_frac = frac_h - frac_l
+
             prior_rows.append({
                 "gene_set":     group_name,
                 "gene":         gene,
@@ -1455,6 +1531,9 @@ def _rank_niche_genes(
                 "mean_high":    float(h_vals.mean()),
                 "mean_low":     float(l_vals.mean()),
                 "log2_fc":      float(np.log2((h_vals.mean() + 1.0) / (l_vals.mean() + 1.0))),
+                "frac_high":    frac_h,
+                "frac_low":     frac_l,
+                "delta_frac":   d_frac,
                 "pvalue":       float(p),
                 "auc":          float(auc),
             })
@@ -1463,13 +1542,45 @@ def _rank_niche_genes(
     if not prior_df.empty and "pvalue" in prior_df.columns:
         _, prior_fdr, _, _ = multipletests(prior_df["pvalue"].to_numpy(), method="fdr_bh")
         prior_df["fdr"] = prior_fdr
+
+    n_sig_prior = 0
+    if not prior_df.empty:
+        n_sig_prior = int(
+            ((prior_df.get("auc", pd.Series()) > 0.6) &
+             ((prior_df.get("fdr", pd.Series(1.0)) < 0.05) |
+              (prior_df.get("delta_frac", pd.Series(0.0)) > 0.10))).sum()
+        )
     logging.info(
-        "Prior gene set results: %d genes tested, %d with AUC>0.6 & FDR<0.05",
+        "Prior gene set results: %d genes tested, %d with AUC>0.6 & (FDR<0.05 or delta_frac>0.10)",
         len(prior_df),
-        int(((prior_df.get("auc", pd.Series()) > 0.6) &
-             (prior_df.get("fdr", pd.Series(1.0)) < 0.05)).sum())
-        if not prior_df.empty else 0,
+        n_sig_prior,
     )
+
+    # ── Layer 2 → 强制合并入 result：将满足条件的先验基因补充入签名列表 ─────
+    # 解决问题：FOXP3 等目标基因可能因 log2FC 过低而无法通过 Layer 1 筛选，
+    # 但其 delta_frac（检出率差值）或 AUC 体现了真实的生物学富集。
+    # 在此强制将 AUC > 0.6 且 delta_frac > 0.05 的先验基因纳入最终列表。
+    if not prior_df.empty:
+        prior_sig_genes = prior_df[
+            (prior_df.get("auc", pd.Series(0.0)) > 0.6) &
+            (prior_df.get("delta_frac", pd.Series(0.0)) > 0.05)
+        ]["actual_gene"].dropna().unique().tolist()
+
+        if prior_sig_genes:
+            logging.info(
+                "Layer 2 forced-merge: %d prior genes will be added to signature "
+                "(AUC>0.6 & delta_frac>0.05): %s",
+                len(prior_sig_genes),
+                ", ".join(prior_sig_genes[:10]),
+            )
+            # 从 ranked 中取出这些基因的全部统计量
+            forced_rows = ranked[ranked["gene"].isin(prior_sig_genes)].copy()
+            # 合并：已在 result 中的不重复添加
+            already = set(result["gene"].tolist())
+            new_rows = forced_rows[~forced_rows["gene"].isin(already)]
+            if not new_rows.empty:
+                result = pd.concat([result, new_rows], ignore_index=True)
+                result = result.sort_values("composite_score", ascending=False).reset_index(drop=True)
 
     # ── Layer 3：Gini Index 特异性评分 ─────────────────────────────────────────
     gini_rows = []
@@ -1586,6 +1697,116 @@ def _plot_volcano(
     fig.savefig(path, dpi=180, bbox_inches="tight")
     plt.close(fig)
     logging.info("Volcano plot saved: %s", path)
+
+
+# ============================================================
+# 新增：检出率差值散点图（Fraction Scatter）
+# ============================================================
+
+def _plot_fraction_scatter(
+    ranked: pd.DataFrame,
+    path: Path,
+    delta_frac_threshold: float = 0.10,
+    fc_threshold: float = 0.5,
+    highlight_genes: list[str] | None = None,
+) -> None:
+    """
+    绘制"检出率差值 vs log2FC"散点图（Fraction Scatter Plot）。
+
+    【设计目的】
+    火山图以均值 log2FC 为横轴，在 Visium spot-level bulk 数据中，FOXP3 等
+    稀有细胞标志基因的均值被大量 0 值压低，即使这些基因在 niche_high 中有更高
+    的检出率（更多 spot 能检测到表达），也无法在火山图上突显。本图以
+    delta_frac（检出率差值）为纵轴，直接展示"niche_high 相对 niche_low 有
+    多少更多 spot 能检出该基因"，是火山图的重要补充视角。
+
+    【颜色说明】
+      🟠 橙色：仅 delta_frac > 阈值（检出率富集，但 FC 不高；典型稀有免疫基因）
+      🔴 红色：同时满足 log2FC > 阈值 且 delta_frac > 阈值（双重显著）
+      🔵 蓝色：仅 log2FC > 阈值（表达量倍数高，但检出率差异不大；可能是高表达管家基因）
+      ⚫ 灰色：两者均不显著
+
+    参数
+    ----
+    ranked               : _rank_niche_genes 返回的 DataFrame（含 log2_fc、delta_frac 列）
+    path                 : 输出图片路径
+    delta_frac_threshold : delta_frac 显著性阈值（默认 0.10，即检出率差 10 个百分点）
+    fc_threshold         : log2FC 显著性阈值（默认 0.5）
+    highlight_genes      : 需要特别标注名称的基因列表（如免疫抑制目标基因）
+    """
+    if "delta_frac" not in ranked.columns or ranked.empty:
+        logging.warning("No delta_frac column found; skipping fraction scatter plot.")
+        return
+
+    if highlight_genes is None:
+        highlight_genes = [
+            g for gs in PRIOR_GENE_SETS.values() for g in gs
+        ] + ["FOXP3", "TGFB1", "FAP", "ACTA2", "CCL22", "CXCL12", "SPP1"]
+
+    df = ranked.copy()
+    # 防止 log2_fc 列不存在时报错
+    if "log2_fc" not in df.columns:
+        logging.warning("No log2_fc column; skipping fraction scatter plot.")
+        return
+
+    def _color(row: pd.Series) -> str:
+        has_frac = row["delta_frac"] > delta_frac_threshold
+        has_fc   = row["log2_fc"]   > fc_threshold
+        if has_fc and has_frac:
+            return "#d62728"   # 红色：双重显著
+        elif has_frac:
+            return "#ff7f0e"   # 橙色：检出率富集
+        elif has_fc:
+            return "#4575b4"   # 蓝色：仅 FC 高
+        else:
+            return "#bdbdbd"   # 灰色
+
+    c_list = [_color(row) for _, row in df.iterrows()]
+
+    fig, ax = plt.subplots(figsize=(8, 6))
+    ax.scatter(df["log2_fc"], df["delta_frac"],
+               c=c_list, s=14, alpha=0.7, linewidths=0)
+
+    # 阈值线
+    ax.axvline(fc_threshold,         color="black", linestyle="--", linewidth=0.8)
+    ax.axhline(delta_frac_threshold, color="black", linestyle="--", linewidth=0.8)
+
+    # 标注目标基因
+    labeled = set()
+    for _, row in df.iterrows():
+        gene = row.get("gene", "")
+        if gene in highlight_genes and gene not in labeled:
+            ax.annotate(
+                gene, (row["log2_fc"], row["delta_frac"]),
+                textcoords="offset points", xytext=(4, 2),
+                fontsize=7, color="#333333",
+                arrowprops=dict(arrowstyle="-", color="#aaaaaa", lw=0.5),
+            )
+            labeled.add(gene)
+
+    # 图例
+    from matplotlib.patches import Patch
+    legend_elements = [
+        Patch(facecolor="#d62728", label=f"Both: log2FC>{fc_threshold} & Δfrac>{delta_frac_threshold}"),
+        Patch(facecolor="#ff7f0e", label=f"Fraction-only: Δfrac>{delta_frac_threshold}"),
+        Patch(facecolor="#4575b4", label=f"FC-only: log2FC>{fc_threshold}"),
+        Patch(facecolor="#bdbdbd", label="Not significant"),
+    ]
+    ax.legend(handles=legend_elements, fontsize=7, frameon=False, loc="upper left")
+
+    n_frac = int((df["delta_frac"] > delta_frac_threshold).sum())
+    n_both = int(((df["delta_frac"] > delta_frac_threshold) & (df["log2_fc"] > fc_threshold)).sum())
+    ax.set_xlabel("log₂FC (niche_high / niche_low)")
+    ax.set_ylabel(f"Δ Fraction (frac_high − frac_low)\n(proportion of spots with expression > 0)")
+    ax.set_title(
+        f"Niche Signature Genes: Fraction of Spots Enrichment\n"
+        f"Δfrac-sig={n_frac}  Both-sig={n_both}  (|FC|>{fc_threshold}, Δfrac>{delta_frac_threshold})",
+        fontsize=10,
+    )
+    fig.tight_layout()
+    fig.savefig(path, dpi=180, bbox_inches="tight")
+    plt.close(fig)
+    logging.info("Fraction scatter plot saved: %s", path)
 
 
 # ============================================================
@@ -2213,20 +2434,32 @@ def main() -> int:
             args.out_dir / "gini_score_genes.csv",
         )
 
-    # 绘制火山图（基于全基因范围的 ranked DataFrame）
-    # 注：此处需传入包含全部基因统计量的 DataFrame（ranked 仅含 Top-N）
-    # 因此重新获取完整统计用于火山图
-    logging.info("Step 14: Generating volcano plot for all tested genes...")
+    # 绘制火山图 + 检出率散点图（基于全基因范围的统计量）
+    # 注：此处需传入包含全部基因统计量的 DataFrame（ranked 仅含 Top-N），
+    # 因此重新计算全基因范围的 log2FC / delta_frac / pvalue / FDR，
+    # 供火山图和检出率散点图共享，无需对同一数据集做两次独立计算。
+    logging.info("Step 14: Generating volcano plot + fraction scatter for all tested genes...")
     try:
-        # 重新计算全基因范围的 log2FC + pvalue，用于火山图（Top-N 不足以展示）
         from scipy.stats import mannwhitneyu as _mwu
         expr_full = _expression_frame(adata)
         high_full = df["niche_high"].astype(bool).reindex(expr_full.index).fillna(False)
+
+        # ── 全基因均值和 log2FC ──────────────────────────────────────────────
         mean_h = expr_full.loc[high_full].mean()
         mean_l = expr_full.loc[~high_full].mean()
         lfc_all = np.log2((mean_h + 1.0) / (mean_l + 1.0))
+
+        # ── 全基因检出率（fraction of spots with expression > 0） ───────────
+        # 解决稀疏基因（如 FOXP3）在均值计算中被稀释的问题
+        frac_h_all = (expr_full.loc[high_full]  > 0).mean(axis=0)
+        frac_l_all = (expr_full.loc[~high_full] > 0).mean(axis=0)
+        delta_frac_all = frac_h_all - frac_l_all
+
+        # ── 全基因 Wilcoxon 检验（仅对候选基因，减少计算量） ────────────────
+        # 候选条件：log2FC > 0.05 OR delta_frac > 0.03（覆盖稀疏目标基因）
         pvals_all = np.full(len(expr_full.columns), 1.0)
-        cands = expr_full.columns[lfc_all.to_numpy() > 0.05].tolist()
+        cand_mask = (lfc_all.to_numpy() > 0.05) | (delta_frac_all.to_numpy() > 0.03)
+        cands = expr_full.columns[cand_mask].tolist()
         for gene in cands:
             gidx = list(expr_full.columns).index(gene)
             try:
@@ -2239,14 +2472,28 @@ def main() -> int:
             except Exception:
                 pass
         _, fdr_all, _, _ = multipletests(pvals_all, method="fdr_bh")
+
+        # ── 构建全基因 DataFrame（同时包含 FC 和 Fraction 信息）─────────────
         volcano_df = pd.DataFrame({
-            "gene": expr_full.columns.tolist(),
-            "log2_fc": lfc_all.to_numpy(),
-            "fdr": fdr_all,
+            "gene":       expr_full.columns.tolist(),
+            "log2_fc":    lfc_all.to_numpy(),
+            "frac_high":  frac_h_all.to_numpy(),
+            "frac_low":   frac_l_all.to_numpy(),
+            "delta_frac": delta_frac_all.to_numpy(),
+            "fdr":        fdr_all,
         })
+
+        # 火山图（log2FC vs -log10 FDR）
         _plot_volcano(volcano_df, plot_dir / "niche_signature_volcano.png")
+
+        # 检出率散点图（log2FC vs delta_frac，突出 FOXP3 等稀有基因的富集）
+        logging.info("Step 14: Generating fraction scatter plot...")
+        _plot_fraction_scatter(
+            volcano_df,
+            plot_dir / "niche_fraction_scatter.png",
+        )
     except Exception as exc:
-        logging.warning("Volcano plot failed: %s", exc)
+        logging.warning("Volcano/fraction plot failed: %s", exc)
 
     # ── Step 15: 参数扫描（resolution × niche_high_quantile 网格搜索）────────────
     logging.info("Step 15: Running parameter scan (resolution × quantile grid)...")
