@@ -53,10 +53,19 @@
                    输出新列：frac_high / frac_low / delta_frac / composite_score；
                  Layer 2 - 先验功能基因集 AUC 检验（Treg/TAM/CAF 三组）：
                    增加 delta_frac 列；AUC>0.6 且 delta_frac>0.05 的先验基因强制合并；
-                 Layer 3 - Gini Index 特异性评分（局灶性高表达稀有免疫基因检测）；
+                  Layer 3 - Gini Index 特异性评分（局灶性高表达稀有免疫基因检测）：
+                    Gini>0.3 且 log2FC>0（阈值由 0.5 降至 0.3，覆盖 FOXP3 等稀有基因）；
                  绘制火山图（FC vs FDR）+ 检出率散点图（FC vs delta_frac）；
-      Step 15  参数扫描稳定性评估（resolution × niche_high_quantile 二维网格搜索），
-               量化不同参数组合下 DEG 列表的 Jaccard 重叠度，生成热图。
+      Step 15  参数扫描稳定性评估（k × niche_high_quantile 二维网格搜索）：
+               【修复说明】原 resolution × quantile 扫描存在根本缺陷——Leiden
+               resolution 仅决定聚类粒度，不影响 niche_score 数值，导致所有列
+               DEG 结果完全相同，热图无意义。改为 k × quantile 扫描，k（kNN
+               邻居数）直接影响邻域组成向量，进而影响 niche_score 和 DEG 结果：
+                 · 横轴：niche_high_quantile（0.70 / 0.75 / 0.80 / 0.85）
+                 · 纵轴：k（8 / 10 / 15 / 20 / 25）
+                 · 颜色：FDR<0.05 且 log2FC>0.5 的 DEG 数量
+               选参标准：颜色最深且处于"高原"区域（与相邻格子结果相近）的
+               参数组合为推荐；若主流程参数（k=15, q=0.80）位于高原区，则合理。
 
 【niche 识别策略说明（参考 docs/niche修改.md）】
     - niche 发现主体：空间邻接图 → 邻域组成向量 → Leiden 无监督聚类；
@@ -83,7 +92,11 @@
       prior_gene_set_auc.csv                             - Layer 2 先验基因集 AUC 检验结果
                                                            （含 frac_high / frac_low / delta_frac 列）
       gini_score_genes.csv                               - Layer 3 Gini Index 特异性基因
+                                                           （Gini>0.3 且 log2FC>0，
+                                                            降低阈值以覆盖 FOXP3 等稀有免疫基因）
       param_scan_deg_stability.csv                       - 参数扫描 DEG 稳定性数据
+                                                           列：k / quantile / n_sig_deg /
+                                                               mean_log2fc_topN / top_genes_str
       plots/
         spatial_hepatocyte.png                           - Hepatocyte 空间分布图
         spatial_treg.png                                 - Treg 空间分布图
@@ -1592,7 +1605,7 @@ def _rank_niche_genes(
         if l2fc <= 0:
             continue  # 仅对在 niche_high 中更高表达的基因计算 Gini
         gini = _gini_index(g_vals)
-        if gini > 0.5:  # 只保留 Gini 较高（局灶性表达）的基因
+        if gini > 0.3:  # 保留 Gini 较高（局灶性表达）的基因；0.3 覆盖稀有免疫基因
             gini_rows.append({
                 "gene":    gene,
                 "gini":    round(gini, 4),
@@ -1922,69 +1935,76 @@ def _param_scan_deg_stability(
     myeloid_col: str,
     fibroblast_col: str,
     n_neighbors: int = 15,
-    resolution_list: tuple[float, ...] = (0.3, 0.4, 0.5, 0.6, 0.7),
+    k_list: tuple[int, ...] = (8, 10, 15, 20, 25),
     quantile_list: tuple[float, ...] = (0.70, 0.75, 0.80, 0.85),
     top_n: int = 50,
     seed: int = 1234,
 ) -> pd.DataFrame:
     """
-    对 Leiden 分辨率 × niche_high 分位数阈值进行网格扫描，
+    对 kNN 邻居数（k）× niche_high 分位数阈值进行网格扫描，
     以 DEG 稳定性（显著基因数量 + 相邻参数组合 Jaccard 相似度）
     作为目标函数，辅助选择最优参数组合。
 
-    扫描逻辑（resolution × quantile 共 5×4 = 20 种参数组合）：
-      1. 对每种参数组合，重新计算邻域评分并切割 niche_high；
-      2. 对 niche_high vs niche_low 做 Wilcoxon 检验，记录：
-           - n_sig_deg    : FDR < 0.05 且 log2FC > 0.5 的基因数量
-           - mean_log2fc  : Top-N 基因的平均 log2FC
-      3. 对相邻参数组合（resolution ±0.1 或 quantile ±0.05），
+    【为什么改为 k × quantile，而不是 resolution × quantile？】
+    原来的 resolution × quantile 扫描存在根本性缺陷：
+      - niche_score 的计算（Step 9）基于邻域组成向量的 Z-score 加总；
+      - 邻域组成向量由 k-NN 邻居数决定，k 不同则每个 spot 的邻域大小不同；
+      - Leiden resolution 仅决定聚类粒度（n_clusters），不影响 niche_score 数值；
+      - 因此，固定 k 时改变 resolution 对 DEG 结果没有任何影响，热图列完全相同。
+
+    k 才是真正影响 niche 评分的参数：
+      - 小 k（如 k=8）：邻域小，捕捉微观局灶性免疫聚集；
+      - 大 k（如 k=25）：邻域大，捕捉宏观区域性免疫浸润模式；
+      - 不同 k 下 niche_score 向量不同，DEG 结果自然不同，热图有意义差异。
+
+    扫描逻辑（k × quantile 共 5×4 = 20 种参数组合）：
+      1. 对每种 k，重新构建 kNN 邻接图，重新计算邻域组成向量和 niche_score；
+      2. 对每种 quantile 阈值切割 niche_high；
+      3. 对 niche_high vs niche_low 做 Wilcoxon 检验，记录：
+           - n_sig_deg      : FDR < 0.05 且 log2FC > 0.5 的基因数量
+           - mean_log2fc    : Top-N 基因的平均 log2FC
+           - top_genes_str  : 前 20 个基因名（用于跨参数 Jaccard 比较）
+      4. 对相邻参数组合（k ±1档 或 quantile ±0.05），
          计算 Top-N 基因列表之间的 Jaccard 相似度（稳健性指标）
 
-    【选参标准】
-      - 热图中 n_sig_deg 最大且位于"高原"区域（与相邻参数结果相近）的
-        参数组合即为最优选择；
-      - 若当前参数（resolution=0.5, quantile=0.80）接近热图最优区域，
-        则现有参数被证明合理。
+    【热图解读】
+      - 横轴：niche_high_quantile（阈值越高 = niche_high 越少 = 越严格）
+      - 纵轴：k（邻居数越大 = 邻域越大 = 捕捉宏观模式）
+      - 颜色：n_sig_deg 越深 = 该参数组合下可重复 DEG 越多
+      - 选参标准：颜色最深且处于"高原"区域（与相邻参数结果相近）的组合即为推荐
 
     参数
     ----
-    adata           : AnnData 数据对象
-    proportions     : 细胞类型比例矩阵
-    coords          : 空间坐标
-    gene_score      : 免疫抑制基因模块评分
-    treg_col        : Treg 比例列名
-    myeloid_col     : Myeloid 比例列名
-    fibroblast_col  : Fibroblast 比例列名
-    n_neighbors     : kNN 邻居数（固定）
-    resolution_list : Leiden 分辨率扫描列表
-    quantile_list   : niche_high 分位数阈值扫描列表
-    top_n           : 用于计算 Jaccard 的 Top-N 基因数
-    seed            : 随机数种子
+    adata          : AnnData 数据对象
+    proportions    : 细胞类型比例矩阵
+    coords         : 空间坐标
+    gene_score     : 免疫抑制基因模块评分
+    treg_col       : Treg 比例列名
+    myeloid_col    : Myeloid 比例列名
+    fibroblast_col : Fibroblast 比例列名
+    n_neighbors    : 主流程使用的 kNN 邻居数（参考值，出现在热图中对应格子）
+    k_list         : kNN 邻居数扫描列表（主轴参数，真正影响 niche_score）
+    quantile_list  : niche_high 分位数阈值扫描列表
+    top_n          : 用于计算 Jaccard 的 Top-N 基因数
+    seed           : 随机数种子（供 Leiden 使用，本步骤不重新运行 Leiden）
 
     返回
     ----
     pd.DataFrame，每行为一种参数组合的结果：
-      resolution / quantile / n_sig_deg / mean_log2fc_topN / n_clusters
+      k / quantile / n_sig_deg / mean_log2fc_topN / top_genes_str
     """
     import itertools
 
     gs = gene_score.reindex(proportions.index).fillna(0.0)
-    neighbors_knn = _build_knn_neighbors(coords, k=n_neighbors)
     rows = []
 
-    for resolution, quantile in itertools.product(resolution_list, quantile_list):
+    for k, quantile in itertools.product(k_list, quantile_list):
         try:
-            # 1. Leiden 聚类（重新运行）
-            nc_labels = _leiden_cluster_neighborhood(
-                _compute_neighborhood_composition(proportions, neighbors_knn),
-                n_neighbors=n_neighbors,
-                resolution=resolution,
-                seed=seed,
-            )
-            n_clusters = int(len(nc_labels.unique()))
+            # 1. 重新构建 k 近邻图（k 变化 → 邻域大小变化 → niche_score 真正不同）
+            neighbors_k = _build_knn_neighbors(coords, k=k)
 
-            # 2. 计算邻域组成评分
-            neighborhood_comp = _compute_neighborhood_composition(proportions, neighbors_knn)
+            # 2. 用新的邻域大小重新计算邻域组成向量和 niche_score
+            neighborhood_comp = _compute_neighborhood_composition(proportions, neighbors_k)
             niche_score = (
                 _zscore(neighborhood_comp[treg_col])
                 + _zscore(neighborhood_comp[myeloid_col])
@@ -1992,13 +2012,13 @@ def _param_scan_deg_stability(
                 + _zscore(gs)
             )
 
-            # 3. 切割 niche_high
+            # 3. 切割 niche_high（quantile 变化 → 高分组大小变化）
             thr = float(niche_score.quantile(quantile))
             niche_high = niche_score >= thr
 
             if int(niche_high.sum()) < 3 or int((~niche_high).sum()) < 3:
                 logging.debug(
-                    "Param scan [r=%.1f, q=%.2f]: skipped (too few spots).", resolution, quantile
+                    "Param scan [k=%d, q=%.2f]: skipped (too few spots).", k, quantile
                 )
                 continue
 
@@ -2026,11 +2046,11 @@ def _param_scan_deg_stability(
             sig_mask = (fdr < 0.05) & (lfc.to_numpy() > 0.5)
             n_sig = int(sig_mask.sum())
 
-            # Top-N 基因
+            # Top-N 基因（按 log2FC 降序）
             sig_df = pd.DataFrame({
-                "gene": expr.columns.tolist(),
+                "gene":    expr.columns.tolist(),
                 "log2_fc": lfc.to_numpy(),
-                "fdr": fdr,
+                "fdr":     fdr,
             })
             top_genes = (
                 sig_df[sig_df["fdr"] < 0.05]
@@ -2045,21 +2065,19 @@ def _param_scan_deg_stability(
                 if top_genes else 0.0
 
             rows.append({
-                "resolution":   resolution,
-                "quantile":     quantile,
-                "n_clusters":   n_clusters,
-                "n_sig_deg":    n_sig,
+                "k":               k,
+                "quantile":        quantile,
+                "n_sig_deg":       n_sig,
                 "mean_log2fc_topN": round(mean_lfc_top, 4),
-                "top_genes_str": ";".join(top_genes[:20]),  # 保存前 20 个便于比较
+                "top_genes_str":   ";".join(top_genes[:20]),
             })
             logging.info(
-                "Param scan [r=%.1f, q=%.2f]: n_clusters=%d, n_sig_deg=%d, "
-                "mean_log2fc_top%d=%.3f",
-                resolution, quantile, n_clusters, n_sig, top_n, mean_lfc_top,
+                "Param scan [k=%d, q=%.2f]: n_sig_deg=%d, mean_log2fc_top%d=%.3f",
+                k, quantile, n_sig, top_n, mean_lfc_top,
             )
         except Exception as exc:
             logging.warning(
-                "Param scan [r=%.1f, q=%.2f] failed: %s", resolution, quantile, exc
+                "Param scan [k=%d, q=%.2f] failed: %s", k, quantile, exc
             )
 
     return pd.DataFrame(rows)
@@ -2087,9 +2105,9 @@ def _plot_param_scan_heatmap(
         logging.warning("Empty param scan DataFrame; skipping heatmap.")
         return
 
-    # 透视表：行=resolution，列=quantile，值=n_sig_deg
+    # 透视表：行=k（kNN邻居数），列=quantile，值=n_sig_deg
     pivot = param_scan_df.pivot(
-        index="resolution", columns="quantile", values="n_sig_deg"
+        index="k", columns="quantile", values="n_sig_deg"
     )
 
     fig, ax = plt.subplots(figsize=(7, 5))
@@ -2099,13 +2117,13 @@ def _plot_param_scan_heatmap(
         annot=True, fmt="d",
         linewidths=0.5,
         ax=ax,
-        cbar_kws={"label": "Number of significant DEGs\n(FDR<0.05, |log2FC|>0.5)"},
+        cbar_kws={"label": "Number of significant DEGs\n(FDR<0.05, log2FC>0.5)"},
     )
     ax.set_xlabel("niche_high quantile threshold")
-    ax.set_ylabel("Leiden resolution")
+    ax.set_ylabel("kNN neighbors (k)")
     ax.set_title(
         "Parameter Scan: DEG Stability Heatmap\n"
-        "(Optimal = darkest cells in stable plateau region)",
+        "(k × quantile; darker = more stable DEGs; optimal = darkest plateau)",
         fontsize=10,
     )
     fig.tight_layout()
@@ -2424,15 +2442,17 @@ def main() -> int:
         )
 
     # 保存 Layer 3：Gini Index 特异性评分
-    gini_df = ranked.attrs.get("gini_df", pd.DataFrame())
-    if not gini_df.empty:
-        gini_df.to_csv(
-            args.out_dir / "gini_score_genes.csv", index=False
-        )
-        logging.info(
-            "Gini index genes saved: %s",
-            args.out_dir / "gini_score_genes.csv",
-        )
+    # 无论结果是否为空，始终写出 CSV（保证文件路径可预期）
+    gini_df = ranked.attrs.get("gini_df", pd.DataFrame(
+        columns=["gene", "gini", "log2_fc", "mean_high"]
+    ))
+    gini_out = args.out_dir / "gini_score_genes.csv"
+    gini_df.to_csv(gini_out, index=False)
+    logging.info(
+        "Gini index genes saved: %s  (%d genes with Gini>0.3 & log2FC>0)",
+        gini_out,
+        len(gini_df),
+    )
 
     # 绘制火山图 + 检出率散点图（基于全基因范围的统计量）
     # 注：此处需传入包含全部基因统计量的 DataFrame（ranked 仅含 Top-N），
@@ -2507,7 +2527,7 @@ def main() -> int:
             myeloid_col=args.myeloid_col,
             fibroblast_col=args.fibroblast_col,
             n_neighbors=args.n_neighbors,
-            resolution_list=(0.3, 0.4, 0.5, 0.6, 0.7),
+            k_list=(8, 10, 15, 20, 25),
             quantile_list=(0.70, 0.75, 0.80, 0.85),
             top_n=args.top_niche_genes,
             seed=args.seed,
