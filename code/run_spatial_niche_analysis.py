@@ -314,6 +314,13 @@ def _parse_args() -> argparse.Namespace:
         help="输出 niche 特征基因数量",
     )
     parser.add_argument("--seed", type=int, default=1234, help="随机数种子")
+    parser.add_argument(
+        "--per-sample-neighbors", action="store_true",
+        help=(
+            "联合分析模式：kNN 空间邻域只在同一切片（sample）内建立，不允许跨切片。"
+            "需要 adata.obs['sample'] 列标记切片来源（由 run_preprocessing.py 联合模式写入）。"
+        ),
+    )
     return parser.parse_args()
 
 
@@ -489,6 +496,56 @@ def _build_knn_neighbors(coords: np.ndarray, k: int) -> list[np.ndarray]:
     tree = KDTree(coords)
     _, indices = tree.query(coords, k=k + 1)   # 第 0 列为自身，需排除
     return [indices[i, 1:] for i in range(len(coords))]
+
+
+def _build_knn_neighbors_per_sample(
+    coords: np.ndarray,
+    sample_labels: pd.Series,
+    k: int,
+) -> list[np.ndarray]:
+    """
+    联合分析模式：在每个样本（切片）内部独立建立 k 最近邻，不允许跨样本邻居。
+
+    设计目的：在 HCC4R + CHC20 联合分析中，HCC4R 和 CHC20 来自不同患者、
+    不同组织切片，物理上不存在空间邻接关系。若允许跨样本建立邻居，会引入
+    不存在的生物学关联，污染邻域组成向量，造成 niche 识别偏差。
+
+    本函数按 sample_labels 将 spot 分组，在每组内独立建立 k-NN，
+    最终返回全局索引（维持与主流程其余函数接口一致）。
+
+    参数
+    ----
+    coords        : (n_spots, 2) 全局空间坐标数组
+    sample_labels : pd.Series，索引为整数位置（0..n_spots-1），值为样本名
+    k             : 每个 spot 的组内邻居数量
+
+    返回
+    ----
+    list[np.ndarray]，长度 = n_spots，每个元素为该 spot 在同一样本内的 k 个最近邻
+    的全局索引。
+    """
+    n = len(coords)
+    neighbors: list[np.ndarray] = [np.array([], dtype=int)] * n
+    unique_samples = sample_labels.unique()
+
+    for sname in unique_samples:
+        # 获取该样本的行位置索引
+        idx_in_sample = np.where(sample_labels.values == sname)[0]
+        if len(idx_in_sample) <= k:
+            # 样本内 spot 数不够，全量互为邻居
+            for pos in idx_in_sample:
+                neighbors[pos] = idx_in_sample[idx_in_sample != pos]
+            continue
+
+        sub_coords = coords[idx_in_sample]
+        tree = KDTree(sub_coords)
+        _, local_indices = tree.query(sub_coords, k=k + 1)  # 含自身，去掉第 0 列
+        # 将局部索引转换为全局索引
+        for local_i, global_i in enumerate(idx_in_sample):
+            local_nbr = local_indices[local_i, 1:]          # 去掉自身
+            neighbors[global_i] = idx_in_sample[local_nbr]
+
+    return neighbors
 
 
 def _neighbor_mean(values: pd.Series, neighbors: list[np.ndarray]) -> pd.Series:
@@ -872,7 +929,7 @@ def _spatial_scatter(
     value: str,
     path: Path,
     title: str,
-    cmap: str = "viridis",
+    cmap: str = "paper_ybp",
     categorical: bool = False,
 ) -> None:
     """
@@ -880,14 +937,32 @@ def _spatial_scatter(
 
     连续值模式（categorical=False）：颜色映射 + 颜色条；
     分类变量模式（categorical=True）：固定颜色 + 图例。
+
+    【配色说明 —— 仿论文 HCC single-cell ecosystem 风格】
+    - 连续值默认使用 "paper_ybp"（Yellow-Black-Purple 渐变），
+      与参考论文图表（Expression 热图）颜色风格一致：
+        低值 → 深紫色 (#3a0063)
+        中值 → 纯黑色 (#000000)
+        高值 → 亮黄色 (#f5e642)
+      此配色对视觉有强对比度，高表达区域突出，适合空间分布图。
+    - 分类变量使用高饱和度固定色板（与论文 tSNE 图风格一致）。
     """
+    from matplotlib.colors import LinearSegmentedColormap as _LSC
+
+    # 自定义 Yellow-Black-Purple 颜色映射（仿论文配色）
+    _PAPER_YBP = _LSC.from_list(
+        "paper_ybp",
+        ["#3a0063", "#000000", "#f5e642"],   # purple → black → yellow
+        N=256,
+    )
+
     fig, ax = plt.subplots(figsize=(7, 6))
     if categorical:
         palette = {
-            "tumor_core":              "#d62728",
-            "tumor_edge":              "#ff7f0e",
-            "stroma_immune":           "#1f77b4",
-            "immunosuppressive_niche": "#9467bd",
+            "tumor_core":              "#c0392b",
+            "tumor_edge":              "#e67e22",
+            "stroma_immune":           "#2980b9",
+            "immunosuppressive_niche": "#8e44ad",
             "other":                   "#bdbdbd",
         }
         colors = df[value].map(palette).fillna("#bdbdbd")
@@ -901,9 +976,11 @@ def _spatial_scatter(
         ]
         ax.legend(handles=handles, frameon=False, loc="best", fontsize=8)
     else:
+        # 选择 colormap：识别 "paper_ybp" 关键词，其余按原名传入
+        actual_cmap = _PAPER_YBP if cmap == "paper_ybp" else cmap
         sc_obj = ax.scatter(
             df["spatial_x"], df["spatial_y"],
-            c=df[value], s=18, cmap=cmap, linewidths=0,
+            c=df[value], s=18, cmap=actual_cmap, linewidths=0,
         )
         fig.colorbar(sc_obj, ax=ax, fraction=0.046, pad=0.04)
     ax.set_title(title)
@@ -920,11 +997,25 @@ def _plot_neighborhood_clusters(df: pd.DataFrame, path: Path) -> None:
     """
     绘制邻域组成聚类（Cellular Neighborhoods）的空间分布图。
 
-    用 tab20 颜色板自动为每个 cluster 分配颜色，图例标注 cluster 编号。
+    【配色说明 —— 仿论文 HCC single-cell ecosystem 风格】
+    参照论文图 C（tSNE 细胞类型聚类图）的色板设计：
+    使用自定义的高饱和度离散色板，优先高对比度颜色，避免相邻 cluster 颜色混淆。
+    色板颜色参照论文中各细胞类型颜色：T cell（#2ca02c），Myeloid（#6a5acd），
+    Malignant（深蓝 #1f4e79），NK（灰绿 #7f7f7f）等。
     """
+    # 高饱和度离散色板（仿论文 tSNE 图颜色风格）
+    _PAPER_CLUSTER_COLORS = [
+        "#2ca02c", "#d62728", "#1f77b4", "#ff7f0e", "#9467bd",
+        "#8c564b", "#e377c2", "#7f7f7f", "#bcbd22", "#17becf",
+        "#aec7e8", "#ffbb78", "#98df8a", "#ff9896", "#c5b0d5",
+        "#c49c94", "#f7b6d2", "#c7c7c7", "#dbdb8d", "#9edae5",
+        "#393b79", "#637939", "#8c6d31", "#843c39", "#7b4173",
+    ]
     clusters = sorted(df["neighborhood_cluster"].unique(), key=lambda x: str(x))
-    cmap_nc = plt.get_cmap("tab20", len(clusters))
-    palette = {c: mcolors.to_hex(cmap_nc(i)) for i, c in enumerate(clusters)}
+    palette = {
+        c: _PAPER_CLUSTER_COLORS[i % len(_PAPER_CLUSTER_COLORS)]
+        for i, c in enumerate(clusters)
+    }
     colors = df["neighborhood_cluster"].map(palette).fillna("#bdbdbd")
 
     fig, ax = plt.subplots(figsize=(7, 6))
@@ -1000,13 +1091,21 @@ def _plot_region_box(df: pd.DataFrame, path: Path) -> None:
 
 def _plot_correlation(df: pd.DataFrame, columns: list[str], path: Path) -> None:
     """
-    绘制指定列之间的 Pearson 相关系数热图（红-白-蓝 vlag 配色）。
+    绘制指定列之间的 Pearson 相关系数热图。
+
+    【配色说明】
+    使用 Purple-Black-Yellow 渐变色（仿论文热图风格）：
+      负相关 → 深紫色；零相关 → 黑色；正相关 → 亮黄色。
 
     用于探索细胞类型比例与 niche 评分之间的共定位关系。
     """
+    from matplotlib.colors import LinearSegmentedColormap as _LSC
+    _PAPER_DIV = _LSC.from_list(
+        "paper_div", ["#3a0063", "#000000", "#f5e642"], N=256
+    )
     corr = df[columns].corr()
     fig, ax = plt.subplots(figsize=(7, 6))
-    sns.heatmap(corr, cmap="vlag", center=0, annot=True,
+    sns.heatmap(corr, cmap=_PAPER_DIV, center=0, annot=True,
                 fmt=".2f", square=True, ax=ax)
     ax.set_title("Cell abundance and niche score correlation")
     fig.tight_layout()
@@ -1684,13 +1783,32 @@ def _plot_volcano(
     ax.axvline(-fc_threshold, color="black", linestyle="--", linewidth=0.8)
     ax.axhline(-np.log10(fdr_threshold), color="black", linestyle="--", linewidth=0.8)
 
-    # 标注目标基因
+    # ── 选择性标注策略 ────────────────────────────────────────────────────────
+    # 只标注以下两类基因，避免图中文字拥挤：
+    #   1. 超过阈值（显著上调）的先验目标基因（highlight_genes 中的基因）
+    #   2. 在阈值附近（|log2FC - fc_threshold| < proximity 或
+    #      |FDR - fdr_threshold| < fdr_proximity）的先验目标基因
+    # 对于既不显著、也不在阈值附近的基因，不标注（即使在 highlight_genes 中）
+    sig_fdr_thresh = -np.log10(fdr_threshold)
+    fc_proximity   = fc_threshold * 0.6       # 阈值 ±60% 范围内算"附近"
+    fdr_proximity  = sig_fdr_thresh * 0.5     # 阈值 ±50% 范围内算"附近"
+
     labeled = set()
     for _, row in df.iterrows():
         gene = row.get("gene", "")
-        if gene in highlight_genes and gene not in labeled:
+        if gene not in highlight_genes or gene in labeled:
+            continue
+        lfc = row["log2_fc"]
+        neg_fdr = row["neg_log10_fdr"]
+
+        is_significant = (lfc > fc_threshold) and (row["fdr"] < fdr_threshold)
+        near_fc_thresh = abs(lfc - fc_threshold) < fc_proximity
+        near_fdr_thresh = abs(neg_fdr - sig_fdr_thresh) < fdr_proximity
+        near_threshold = near_fc_thresh or near_fdr_thresh
+
+        if is_significant or near_threshold:
             ax.annotate(
-                gene, (row["log2_fc"], row["neg_log10_fdr"]),
+                gene, (lfc, neg_fdr),
                 textcoords="offset points", xytext=(4, 2),
                 fontsize=7, color="#333333",
                 arrowprops=dict(arrowstyle="-", color="#aaaaaa", lw=0.5),
@@ -1784,13 +1902,31 @@ def _plot_fraction_scatter(
     ax.axvline(fc_threshold,         color="black", linestyle="--", linewidth=0.8)
     ax.axhline(delta_frac_threshold, color="black", linestyle="--", linewidth=0.8)
 
-    # 标注目标基因
+    # ── 选择性标注策略 ────────────────────────────────────────────────────────────
+    # 只标注以下两类基因，避免图中文字拥挤：
+    #   1. 超过阈值（log2FC > fc_threshold 且/或 delta_frac > delta_frac_threshold）
+    #      的先验目标基因
+    #   2. 在阈值附近（|log2FC - fc_threshold| < proximity 或
+    #      |delta_frac - delta_frac_threshold| < frac_proximity）的先验目标基因
+    fc_proximity   = fc_threshold * 0.6          # 阈值 ±60% 范围内算"附近"
+    frac_proximity = delta_frac_threshold * 0.5  # 阈值 ±50% 范围内算"附近"
+
     labeled = set()
     for _, row in df.iterrows():
         gene = row.get("gene", "")
-        if gene in highlight_genes and gene not in labeled:
+        if gene not in highlight_genes or gene in labeled:
+            continue
+        lfc = row["log2_fc"]
+        dfrac = row["delta_frac"]
+
+        is_significant = (lfc > fc_threshold) or (dfrac > delta_frac_threshold)
+        near_fc_thresh   = abs(lfc   - fc_threshold)          < fc_proximity
+        near_frac_thresh = abs(dfrac - delta_frac_threshold)  < frac_proximity
+        near_threshold   = near_fc_thresh or near_frac_thresh
+
+        if is_significant or near_threshold:
             ax.annotate(
-                gene, (row["log2_fc"], row["delta_frac"]),
+                gene, (lfc, dfrac),
                 textcoords="offset points", xytext=(4, 2),
                 fontsize=7, color="#333333",
                 arrowprops=dict(arrowstyle="-", color="#aaaaaa", lw=0.5),
@@ -2196,11 +2332,34 @@ def main() -> int:
     )
 
     # ── Step 6: 邻域组成聚类（Cellular Neighborhood Discovery）────────────────
-    logging.info(
-        "Step 6: Building kNN neighbors (k=%d) for neighborhood composition clustering...",
-        args.n_neighbors,
-    )
-    neighbors_knn = _build_knn_neighbors(coords, k=args.n_neighbors)
+    # 联合分析模式（--per-sample-neighbors）：空间邻域只在同一切片内建立
+    per_sample = getattr(args, "per_sample_neighbors", False)
+    if per_sample and "sample" in adata.obs.columns:
+        # 重设位置型 Series 索引（0..n_spots-1）以供 _build_knn_neighbors_per_sample 使用
+        sample_labels = pd.Series(
+            adata.obs["sample"].values,
+            index=np.arange(len(adata)),
+        )
+        n_samples = sample_labels.nunique()
+        logging.info(
+            "Step 6: Joint analysis mode — building per-sample kNN neighbors "
+            "(k=%d) for %d samples: %s",
+            args.n_neighbors, n_samples, list(sample_labels.unique()),
+        )
+        neighbors_knn = _build_knn_neighbors_per_sample(
+            coords, sample_labels, k=args.n_neighbors
+        )
+    else:
+        if per_sample and "sample" not in adata.obs.columns:
+            logging.warning(
+                "--per-sample-neighbors specified but 'sample' column not found in adata.obs; "
+                "falling back to global kNN."
+            )
+        logging.info(
+            "Step 6: Building kNN neighbors (k=%d) for neighborhood composition clustering...",
+            args.n_neighbors,
+        )
+        neighbors_knn = _build_knn_neighbors(coords, k=args.n_neighbors)
     neighborhood_comp = _compute_neighborhood_composition(proportions, neighbors_knn)
 
     logging.info(

@@ -14,6 +14,7 @@
   - [CHC20 数据集](#chc20-数据集)
   - [HCC4R 数据集](#hcc4r-数据集)
   - [HCC6NR 数据集](#hcc6nr-数据集)
+  - [HCC4R+CHC20 联合分析](#hcc4rchc20-联合分析)
   - [分步骤运行](#分步骤运行)
   - [Step 3（可选）：Wilcoxon 签名基因交叉验证](#step-3可选wilcoxon-签名基因交叉验证)
   - [Step 4 & 5：TCGA 生存分析（R）](#step-4--5tcga-生存分析r)
@@ -66,6 +67,7 @@ code/
 ├── run_chc20.py              ← CHC20 数据集一键入口（直接运行这个）
 ├── run_hcc4r.py              ← HCC4R 数据集一键入口（直接运行这个）
 ├── run_hcc6nr.py             ← HCC6NR 数据集一键入口（直接运行这个）
+├── run_joint_hcc4r_chc20.py  ← HCC4R+CHC20 联合分析入口（直接运行这个）
 │
 ├── pipeline/                 ← 核心分析流程（被入口脚本调用）
 │   ├── run_preprocessing.py      Step 1：数据预处理 + Cell2location 反卷积
@@ -97,10 +99,19 @@ results/
 │   ├── adata_vis_post.h5ad
 │   ├── spatial_niche/
 │   └── ...
-└── HCC6NR/                   HCC6NR 所有分析结果
-    ├── adata_vis_post.h5ad
-    ├── spatial_niche/
-    └── ...
+├── HCC6NR/                   HCC6NR 所有分析结果
+│   ├── adata_vis_post.h5ad
+│   ├── spatial_niche/
+│   └── ...
+└── joint_HCC4R_CHC20/        HCC4R+CHC20 联合分析结果
+    ├── adata_vis_post.h5ad           合并反卷积结果（含 obs["sample"] 列）
+    ├── adata_vis_post_HCC4R.h5ad     HCC4R 单独结果
+    ├── adata_vis_post_CHC20.h5ad     CHC20 单独结果
+    ├── spot_cell_proportion_joint.csv 合并比例表
+    ├── spatial_signature_genes.txt   联合分析签名基因
+    ├── spatial_niche/                联合空间生态位分析结果
+    │   └── ...（同单数据集结构）
+    └── cross_slice_comparison/       两切片一致性对比图
 ```
 
 ---
@@ -126,6 +137,8 @@ python code/run_hcc6nr.py
 1. 执行 Step 1（预处理 + Cell2location 反卷积）
 2. 执行 Step 2（空间生态位分析）
 3. 将结果保存到各自的 `results/<数据集名>/` 目录
+
+如需跨数据集联合分析（如 HCC4R+CHC20），请使用 [联合分析入口](#hcc4rchc20-联合分析)。
 
 ---
 
@@ -186,6 +199,30 @@ python code/run_hcc6nr.py --no-sample2
 
 ---
 
+### HCC4R+CHC20 联合分析
+
+经批次效应评估确认 HCC4R 与 CHC20 的 batch effect 极小，适合联合分析。联合分析使用同一套 scRNA 参考签名训练一次 RegressionModel，分别反卷积后合并 spot 级结果，在合并数据上进行空间生态位识别（邻域计算限制在切片内）。
+
+```bash
+# 完整流程（Step 1 + Step 2）
+python code/run_joint_hcc4r_chc20.py
+
+# 仅预处理 + 反卷积 + 合并
+python code/run_joint_hcc4r_chc20.py --step1-only
+
+# 仅空间生态位联合分析（已有 adata_vis_post.h5ad 时）
+python code/run_joint_hcc4r_chc20.py --step2-only
+```
+
+**关键参数**：`--per-sample-neighbors`（Step 2 自动启用）
+- 空间 kNN 邻域只在同一切片内建立，不允许 HCC4R 和 CHC20 的 spot 跨切片互为物理邻居
+- 需要合并后的 `adata.obs['sample']` 列标记切片来源
+- 下游 cell composition、cluster、niche score、DEG 分析在合并后的全表上进行，获得更大样本量和更高统计功效
+
+**输出目录**：`results/joint_HCC4R_CHC20/`
+
+---
+
 ### 分步骤运行
 
 如需对某个数据集手动控制各步骤，也可以直接调用 `pipeline/` 中的脚本：
@@ -227,8 +264,18 @@ python code/pipeline/run_spatial_niche_analysis.py \
     --out-dir results/HCC4R/spatial_niche \
     --hep-high-quantile 0.75 \
     --niche-high-quantile 0.80 \
-    --top-niche-genes 80
+    --top-niche-genes 80 \
+    --per-sample-neighbors   # 联合分析时启用：限制邻域在切片内建立
 ```
+
+| 参数 | 说明 |
+|------|------|
+| `--per-sample-neighbors` | 联合分析模式下，kNN 邻域只在同一切片（sample）内建立，不允许跨切片互为物理邻居。需要 `adata.obs['sample']` 列 |
+| `--hep-high-quantile` | 高肝细胞区域分位数阈值（默认 0.75） |
+| `--niche-high-quantile` | 免疫抑制 niche 高分组分位数阈值（默认 0.80） |
+| `--top-niche-genes` | 输出 niche 特征基因数量（默认 80） |
+| `--n-neighbors` | kNN 邻居数（默认 15） |
+| `--leiden-resolution` | Leiden 聚类分辨率（默认 0.5） |
 
 ---
 
@@ -326,6 +373,12 @@ results/HCC4R/
 **参数化设计（新）**：`main()` 函数接受 `path_sample1`, `sample1_name`, `output_dir` 等参数，
 不同数据集只需传入不同参数，无需修改脚本内容。直接运行时默认使用 CHC20/CHC23。
 
+**联合分析模式（新）**：`main_joint()` 函数支持两切片联合反卷积：
+- 用同一个 scRNA 参考训练一次 RegressionModel，得到统一 `cell_state_df`
+- 分别对两张 Visium 切片做 Cell2location 反卷积
+- 合并 spot 级结果，添加 `obs["sample"]` 列标记来源
+- 入口：`python code/run_joint_hcc4r_chc20.py --step1-only`
+
 ---
 
 ### `pipeline/run_spatial_niche_analysis.py`
@@ -340,6 +393,9 @@ results/HCC4R/
 | Gini Index 阈值 | 从 0.5 降至 **0.3**，覆盖 FOXP3 等稀有基因 |
 | gini_score_genes.csv | **始终写出**（即使结果为空），保证文件路径可预期 |
 | delta_frac 检出率 | 计算 niche_high vs niche_low 的 spot 检出率差值，量化稀疏基因富集 |
+| `--per-sample-neighbors` | 联合分析模式下，kNN 邻域只在同一切片内建立，不允许跨切片互为物理邻居 |
+| `_build_knn_neighbors_per_sample()` | 按切片分组构建 kNN 邻域，确保空间邻域的生物学意义 |
+| `_spatial_neighbors_per_sample()` | 按切片分组构建半径邻域，用于邻域均值特征计算 |
 
 **主要输出**：
 

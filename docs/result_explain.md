@@ -2,28 +2,39 @@
 
 本文档对本项目所有 `results/` 目录下生成的输出文件进行逐一解释，说明每个文件的内容格式、如何阅读和解读，以及其背后揭示的生物学意义。
 
-分析流程共分五个步骤，输出文件按步骤组织。
+**当前分析模式：HCC4R + CHC20 联合分析**
+- 使用同一套 scRNA 参考训练一次 RegressionModel，得到统一的 `cell_state_df`
+- 分别对 HCC4R 和 CHC20 做 Cell2location 反卷积
+- 合并两切片 spot 级结果（`obs["sample"]` 列标记来源）进行联合下游分析
+- 结果保存在 `results/joint_HCC4R_CHC20/` 目录下
+- 运行入口：`python code/run_joint_hcc4r_chc20.py`
+
+分析流程共分两个核心步骤，输出文件按步骤组织。
 
 ---
 
 ## 一、Step 1 — 数据预处理与 Cell2location 反卷积（`run_preprocessing.py`）
 
-### 1.1 `adata_vis_post.h5ad`
+### 1.1 `adata_vis_post_joint.h5ad`
 
 **文件格式**：HDF5 格式的 AnnData 对象（单细胞/空间组学标准存储格式）
 
 **内容说明**：
 
-这是 CHC20 切片经过 Cell2location 贝叶斯反卷积之后的核心数据文件，是后续所有空间分析的起点。文件内部包含：
+这是 HCC4R + CHC20 两张切片经过 Cell2location 贝叶斯反卷积后合并的核心数据文件，是后续所有空间分析的起点。文件内部包含：
 
 - `adata.X`：每个 spot 的原始 count 表达矩阵（行 = spot，列 = 基因）
-- `adata.obs`：每个 spot 的元数据，包含组织位置信息
+- `adata.obs`：每个 spot 的元数据，**包含 `sample` 列（"HCC4R" 或 "CHC20"）标记切片来源**
 - `adata.obsm["spatial"]`：每个 spot 的二维空间坐标（来自 Visium 芯片物理布局）
 - `adata.obsm["means_cell_abundance_w_sf"]`：Cell2location 后验估计的细胞类型丰度矩阵（行 = spot，列 = 细胞类型），这是反卷积的主要输出
 
 **如何理解**：
 
 10x Visium 空间转录组每个 spot 直径约 55 μm，理论上可覆盖 1–10 个细胞，但实际上每个 spot 捕获的 RNA 来自多种细胞类型的混合信号。Cell2location 是一种贝叶斯层次模型，利用 scRNA-seq 参考数据中各细胞类型的基因表达特征（参考签名），通过负二项分布似然函数将每个 spot 的混合信号"反卷积"为各细胞类型的估计数量（后验均值 `means_cell_abundance_w_sf`）。
+
+**联合分析设计**：
+
+两张切片（HCC4R 和 CHC20）使用同一套 scRNA-seq 参考签名（一次训练 RegressionModel）进行反卷积，保证了细胞类型估计在相同参考系下可以直接比较。合并后的 spot 通过 `adata.obs["sample"]` 列区分来源，下游空间邻域分析通过 `--per-sample-neighbors` 参数限制在同一切片内建立，不允许跨切片物理邻居。
 
 **揭示的生物学现象**：
 
@@ -36,25 +47,21 @@
 
 ---
 
-### 1.2 `adata_vis_post_CHC23.h5ad`（等效：`adata_vis_chc23_post.h5ad`）
+### 1.2 `adata_vis_post_HCC4R.h5ad` / `adata_vis_post_CHC20.h5ad`
 
 **文件格式**：同上，HDF5 格式的 AnnData 对象
 
 **内容说明**：
 
-CHC23 切片独立运行 Cell2location 的结果，结构与 `adata_vis_post.h5ad` 完全相同，但对应不同患者的肿瘤组织样本。
+各切片独立反卷积结果的保存文件，结构与 `adata_vis_post_joint.h5ad` 相同，但只包含对应切片的 spot。
 
-**如何理解与解读**：
+**如何理解**：
 
-CHC23 是独立验证切片，其 Cell2location 建模使用了从同一 scRNA-seq 数据集中独立训练的参考签名（而非直接借用 CHC20 的签名），保证了验证的统计独立性。
-
-**揭示的生物学现象**：
-
-对比 CHC20 和 CHC23 的反卷积结果，可以评估肝癌免疫微环境的**跨患者一致性**。若两个切片均显示 Treg 与 Myeloid 细胞在同一空间区域共富集，则支持免疫抑制微环境的普遍性，而非个例现象。
+这些单切片文件用于单独分析某张切片，或与联合分析结果对比验证。批次效应极小时（已通过 PCA/UMAP 批次评估确认），联合分析应产生与单独分析高度一致的细胞类型比例。
 
 ---
 
-### 1.3 `spot_cell_proportion.csv`
+### 1.3 `spot_cell_proportion_HCC4R.csv` / `spot_cell_proportion_CHC20.csv`
 
 **文件格式**：CSV 表格
 
@@ -75,7 +82,7 @@ CHC23 是独立验证切片，其 Cell2location 建模使用了从同一 scRNA-s
 
 **如何理解**：
 
-这是将 `adata_vis_post.h5ad` 中的绝对丰度值归一化为相对比例的结果表。每行是一个 spot 的细胞组成"快照"，直接反映该空间位置的局部微环境细胞构成。
+这是将 `adata_vis_post_*.h5ad` 中的绝对丰度值归一化为相对比例的结果表。每行是一个 spot 的细胞组成"快照"，直接反映该空间位置的局部微环境细胞构成。
 
 **揭示的生物学现象**：
 
@@ -85,15 +92,80 @@ CHC23 是独立验证切片，其 Cell2location 建模使用了从同一 scRNA-s
 
 ---
 
-### 1.4 `spot_cell_proportion_CHC23.csv`
+### 1.4 `spot_cell_proportion_joint.csv`
 
-**文件格式**：同 `spot_cell_proportion.csv`
+**文件格式**：CSV 表格（在单切片比例列基础上，加入 `sample` 列）
 
-与 CHC20 的比例表对应，用于跨切片对比分析。
+**内容说明**：
+
+HCC4R 和 CHC20 两张切片的 spot 细胞类型比例合并表，额外包含：
+
+| 列名 | 含义 |
+|------|------|
+| `sample` | 切片来源标记（"HCC4R" 或 "CHC20"） |
+| （其他列同上） | 细胞类型比例 |
+
+**如何理解**：
+
+可以通过 `sample` 列分组，比较 HCC4R 和 CHC20 两张切片在各细胞类型比例上的分布差异，评估联合分析的合理性（批次效应大小）。
 
 ---
 
-### ==1.5== `t_cell_dotplot_horizontal.png`
+### 1.5 `scrna_tsne_celltype.png`（仿论文 Figure C 风格）
+
+**文件格式**：PNG 图像
+
+**内容说明**：
+
+scRNA-seq 单细胞数据的 tSNE（或 UMAP）嵌入可视化图，每个点代表一个细胞，颜色按细胞类型分配（高饱和度离散色板），并在每种细胞类型聚集的中心位置标注类型名称，右侧图例完整展示颜色-类型对应关系，坐标轴以箭头样式标注 tSNE 1 / tSNE 2 方向。
+
+**如何理解**：
+
+此图是分析流程的起点可视化，展示了 scRNA-seq 参考数据集中各细胞类型在低维嵌入空间中的分布格局。不同细胞类型的点云应形成清晰分离的簇，且生物学相近的细胞类型（如 Treg 与 T/NK）在空间上相邻。与参考论文 `docs/plots/1.png` 风格一致。
+
+**揭示的生物学现象**：
+
+- 各细胞类型的分离程度反映参考数据集的质量，分离良好的聚类说明 scRNA-seq 数据捕获了足够的转录异质性
+- Treg 细胞应与其他 T/NK 细胞聚簇相邻但明显分开（若分辨率足够），这验证了 Treg 亚群鉴定的准确性
+- Myeloid、Fibroblast 等基质细胞与免疫细胞（T/NK、Treg）的分离反映了肝癌组织微环境中细胞类型组成的多样性
+
+---
+
+### 1.6 `scrna_celltype_marker_heatmap.png`（仿论文 Figure D 风格）
+
+**文件格式**：PNG 图像
+
+**内容说明**：
+
+细胞类型 Marker 基因平均表达热图，X 轴为细胞类型，Y 轴为各细胞类型的特异性标志基因，颜色采用 Yellow-Black-Purple 三色渐变（paper_ybp 配色：亮黄=高表达，黑色=中等表达，深紫=低/无表达），值为 CP10K 归一化 + log1p 变换后各细胞类型内的均值，再经跨细胞类型 Z-score 标准化（便于横向对比）。与参考论文 `docs/plots/2.png` 风格一致。
+
+**主要 Marker 基因组**：
+
+| 细胞类型 | 关键 Marker 基因 |
+|---------|----------------|
+| T cell | IL7R, CD3G, CD2, ITM2A, CD3D |
+| Myeloid | LYZ, AIF1, RNASE1, C1QB, HLA-DRA |
+| NK | GNLY, GZMB, KLRD1, KLRF1 |
+| B cell | B3GNT7, MS4A1, BANK1, CD79A |
+| Malignant | APOA2, ALB, APOA1, AMBP, APOH |
+| Endothelial | PECAM1, CDH5, SPARCL1, STC1 |
+| Epithelial | INSR, KRT18, KRT19, EPCAM |
+| Plasma cell | JCHAIN, MZB1, IGLL5 |
+| HSC | RGS5, COL1A1, ACTA2, PDGFRB |
+
+**如何理解**：
+
+热图中每列代表一种细胞类型，理想情况下各类型的特异性 Marker 在对应列中呈现亮黄色（高 Z-score），而在其他列中保持深紫色（低表达）。这种"对角线"高亮模式验证了细胞类型注释的可靠性。
+
+**揭示的生物学现象**：
+
+- ALB、APOA2 等白蛋白相关基因在 Malignant/Hepatocyte 类中特异性高表达，确认了肿瘤细胞的肝细胞来源
+- FOXP3 在 Treg 簇的检出模式（即使表达量绝对值低，Z-score 相对差异仍清晰可见）验证了调节性 T 细胞的鉴定
+- COL1A1、ACTA2 在 HSC/Fibroblast 中的高表达揭示了肝星状细胞激活后的基质重塑能力，与免疫抑制微环境的 CAF 功能相关
+
+---
+
+### 1.7 `t_cell_dotplot_horizontal.png`
 
 **文件格式**：PNG 图像
 
@@ -128,13 +200,17 @@ FOXP3 是 Treg 的"主调控转录因子"（master transcription factor），其
 
 ---
 
-### 1.6 `regression_training_history_CHC20.png` / `regression_training_history_CHC23.png`
+### 1.8 `regression_training_history_joint.png`
 
 **文件格式**：PNG 图像
 
 **内容说明**：
 
 Cell2location 第一阶段 RegressionModel（单细胞参考签名学习）的训练损失曲线，x 轴为训练 epoch 数，y 轴为 ELBO（证据下界，Evidence Lower BOund）。
+
+**联合分析模式说明**：
+
+与单切片模式（各切片独立训练）不同，联合分析使用 scRNA 参考与 HCC4R 和 CHC20 的三路共同基因子集训练**一次** RegressionModel，得到统一的参考签名，保证了两张切片的反卷积在同一参考系下进行。
 
 **如何理解**：
 
@@ -146,33 +222,19 @@ ELBO 是变分推断（Variational Inference）中的优化目标，其绝对值
 
 ---
 
-### 1.7 `spatial_mapping_training_history_CHC20.png` / `spatial_mapping_training_history_CHC23.png`
-
-**文件格式**：PNG 图像
-
-**内容说明**：
-
-Cell2location 第二阶段（空间建模）的训练损失曲线，同样展示 ELBO 随训练轮次的变化。
-
-**如何理解**：
-
-与参考签名训练曲线类似，此图验证空间建模是否充分收敛。若曲线未收敛，spot 级别的细胞丰度估计将不可靠。
-
----
-
-### 1.8 `cross_slice_comparison/` 目录（多切片一致性验证图）==有问题==
+### 1.9 `cross_slice_comparison/` 目录（多切片一致性验证图）
 
 #### `cross_slice_mean_proportion_comparison.png`
 
-**内容**：CHC20 与 CHC23 各细胞类型**全切片平均比例**的并排条形图（蓝色=CHC20，橙色=CHC23）。
+**内容**：HCC4R 与 CHC20 各细胞类型**全切片平均比例**的并排条形图（蓝色=HCC4R，橙色=CHC20）。
 
-**如何理解**：若两个切片的细胞类型组成比例趋势相近（如 Hepatocyte 均为最高占比，Treg 均偏低但存在），则说明两个样本的整体微环境构成具有代表性，不存在严重的批次偏差。
+**如何理解**：若两个切片的细胞类型组成比例趋势相近（如 Hepatocyte 均为最高占比，Treg 均偏低但存在），则说明两个样本的整体微环境构成具有代表性，不存在严重的批次偏差，支持联合分析的合理性。
 
 **揭示的生物学现象**：肝癌肿瘤微环境的"细胞生态"在不同患者之间是否具有共同特征，即肝细胞癌 TME 免疫细胞组成的普遍性。
 
 #### `cross_slice_treg_distribution.png`
 
-**内容**：CHC20 与 CHC23 Treg 比例分布的核密度估计（KDE）对比曲线。
+**内容**：HCC4R 与 CHC20 Treg 比例分布的核密度估计（KDE）对比曲线。
 
 **如何理解**：x 轴为 Treg 比例，y 轴为密度。分布峰值、宽度和尾部形状相近则说明两切片的 Treg 浸润模式一致。
 
@@ -186,17 +248,21 @@ Cell2location 第二阶段（空间建模）的训练损失曲线，同样展示
 
 ---
 
-### 1.9 `shared_genes_CHC20.txt` / `shared_genes_CHC23.txt`
+### 1.10 `shared_genes_joint.txt`
 
 **文件格式**：纯文本，每行一个基因名
 
-**内容说明**：scRNA-seq 参考数据与对应 Visium 切片之间共有的基因列表，即最终用于 Cell2location 建模的基因集。
+**内容说明**：scRNA-seq 参考数据与 HCC4R 和 CHC20 两张 Visium 切片**三路共同基因列表**，即最终用于 Cell2location 建模的基因集。
 
-**如何理解**：共有基因数量通常在 2,000–5,000 个之间（取决于 scRNA-seq 测序深度和 Visium 捕获效率）。过少的共有基因会降低反卷积的区分能力。
+**如何理解**：三路交集（scRNA ∩ HCC4R ∩ CHC20）保证了联合分析中两张切片的反卷积使用完全相同的基因空间。共有基因数量通常在 2,000–5,000 个之间（取决于测序深度和 Visium 捕获效率）。
 
 ---
 
 ## 二、Step 2 — 空间免疫抑制生态位分析（`run_spatial_niche_analysis.py`）
+
+**联合分析说明**：
+
+Step 2 读取 `adata_vis_post_joint.h5ad`（含两张切片合并 spot），通过 `--per-sample-neighbors` 参数确保空间 kNN 邻域只在**同一切片内**建立，不允许 HCC4R 的 spot 和 CHC20 的 spot 跨切片互为物理邻居，保留空间组织结构的生物学意义。下游 cell composition、cluster、niche score、差异分析在合并后的全表上进行，获得更大样本量和更高统计功效。
 
 ### 2.1 `spatial_niche/spatial_niche_scores.csv`
 
@@ -206,7 +272,8 @@ Cell2location 第二阶段（空间建模）的训练损失曲线，同样展示
 
 | 列名 | 类型 | 含义 |
 |------|------|------|
-| `spot_id` | 字符串 | Spot 唯一标识符 |
+| `spot_id` | 字符串 | Spot 唯一标识符（含样本前缀，如 `HCC4R_ACGCCTGACACGCGCT-1`） |
+| `sample` | 字符串 | 切片来源标记（"HCC4R" 或 "CHC20"） |
 | `spatial_x` / `spatial_y` | 浮点数 | 空间坐标（像素单位） |
 | `Hepatocyte` / `Treg` / `Myeloid` / `Fibroblast` / `T/NK` | 浮点数（0–1） | 各细胞类型归一化比例 |
 | `immunosuppressive_gene_score` | 浮点数 | 免疫抑制标志基因（FOXP3、IL2RA、CTLA4、TIGIT、LAG3、TGFB1、IL10 等）的 CP10K+log1p 归一化平均表达量 |
@@ -225,18 +292,18 @@ Cell2location 第二阶段（空间建模）的训练损失曲线，同样展示
 
 本分析采用两阶段策略识别免疫抑制生态位：
 
-**阶段 1：数据驱动的无监督发现（划定“社区”边界）**
+**阶段 1：数据驱动的无监督发现（划定"社区"边界）**
 
-- 动作 1：获取邻域信息（平滑化） 孤立地看一个 spot 是不准的。这一步计算了每个 spot 周围最近的 15 个“邻居”（k=15）的细胞组成均值。
-  - *比喻：* 评估一个房子的价值，不仅看房子本身，还要看它所在街道周围 15 套房子的平均水平。这消除了单点噪声，真正抓取了“微环境”特征。
-- 动作 2：Leiden 聚类 算法根据上面算出的“街道平均特征”进行无监督聚类。把细胞组成相似的“街道”归为一类，生成了 `neighborhood_cluster`（例如 Cluster 0, 1, 2...）。
+- 动作 1：获取邻域信息（平滑化） 孤立地看一个 spot 是不准的。这一步计算了每个 spot 周围最近的 15 个"邻居"（k=15）的细胞组成均值。空间邻域**限制在同一切片内计算**（`--per-sample-neighbors` 参数），避免 HCC4R 的 spot 和 CHC20 的 spot 跨切片互为邻居。
+  - *比喻：* 评估一个房子的价值，不仅看房子本身，还要看它所在街道周围 15 套房子的平均水平。这消除了单点噪声，真正抓取了"微环境"特征。
+- 动作 2：Leiden 聚类 算法根据上面算出的"街道平均特征"进行无监督聚类。把细胞组成相似的"街道"归为一类，生成了 `neighborhood_cluster`（例如 Cluster 0, 1, 2...）。
   - *结果：* 此时，算法只知道把相似的区域分在一起，但并不知道这些区域代表什么生物学意义。
 
-**阶段 2：功能评分与语义注释（给“社区”贴标签）**
+**阶段 2：功能评分与语义注释（给"社区"贴标签）**
 
 - 动作 3：多维特征考核 研究者针对每一个聚类（Cluster），计算了四个关键指标的均值：**Treg 比例、Myeloid 比例（通常代表肿瘤相关巨噬细胞 TAM）、Fibroblast 比例（肿瘤相关成纤维细胞 CAF）、免疫抑制基因评分**。
-- 动作 4：最高分胜出（命名为 immunosuppressive_niche） 在这四个维度上综合得分最高、表现最“恶劣”（抑制性最强）的那个 Cluster，被正式赋予了 `niche_semantic_label = "immunosuppressive_niche"` 的头衔。
-  - *生物学意义：* 这就是肿瘤用来逃避免疫系统追杀的“安全屋”（免疫排除区）。在这里，Treg、TAM 和 CAF 沆瀣一气，释放免疫抑制因子，让效应 T 细胞（杀手细胞）无法靠近或失去活性。
+- 动作 4：最高分胜出（命名为 immunosuppressive_niche） 在这四个维度上综合得分最高、表现最"恶劣"（抑制性最强）的那个 Cluster，被正式赋予了 `niche_semantic_label = "immunosuppressive_niche"` 的头衔。
+  - *生物学意义：* 这就是肿瘤用来逃避免疫系统追杀的"安全屋"（免疫排除区）。在这里，Treg、TAM 和 CAF 沆瀣一气，释放免疫抑制因子，让效应 T 细胞（杀手细胞）无法靠近或失去活性。
 
 **附加阶段：连续评分与高低分组（用于下游差异分析）**
 
@@ -250,6 +317,7 @@ Cell2location 第二阶段（空间建模）的训练损失曲线，同样展示
 - `niche_semantic_label = "immunosuppressive_niche"` 的 spot 集合定义了**肿瘤免疫抑制微生态位**的空间范围，即 Treg、TAM（Myeloid）和 CAF（Fibroblast）三类细胞同时局部富集的区域
 - 这类区域在生物学上对应肿瘤逃逸的"免疫沙漠"或"免疫排除"区域，是效应 T 细胞难以发挥杀伤功能的关键空间结构
 - `spatial_region` 的分层（肿瘤核心→肿瘤边缘→免疫基质区域）反映了肿瘤组织内部微环境的空间异质性
+- **联合分析的优势**：两张切片共 2× 数量的 spot 参与 Leiden 聚类，聚类稳定性更高；DEG 分析的统计功效更强（更多 `niche_high` 和 `niche_low` spot 样本）
 
 ---
 
@@ -270,6 +338,7 @@ Cell2location 第二阶段（空间建模）的训练损失曲线，同样展示
 | `niche_high_threshold` | niche_high 评分阈值（80百分位值） |
 | `n_niche_high` | 被标记为 niche_high 的 spot 总数 |
 | `marker_genes_used` | 实际用于计算免疫抑制基因评分的基因列表 |
+| `per_sample_neighbors` | 是否启用按切片内建立空间邻域（联合分析时为 True） |
 
 **如何理解**：
 
@@ -287,15 +356,16 @@ Cell2location 第二阶段（空间建模）的训练损失曲线，同样展示
 |------|------|
 | `param_mode` | 参数类型（`knn` 或 `radius`） |
 | `param_label` | 参数具体设置（如 `kNN k=10`、`radius×1.0`） |
-| `n_niche_high` | 该参数下 niche_high spot 的数量 |
-| `niche_pct` | niche_high 占全部 spot 的百分比 |
-| `score_mean` / `score_std` | niche 评分的均值和标准差 |
+| `spearman_rho` | Spearman 秩相关系数（与参考配置 k=15 相比的评分排序一致性） |
+| `weighted_jaccard` | 加权 Jaccard 相似度（连续版本，对高分区域天然加权） |
 
 **如何理解**：
 
-敏感性分析扫描了 kNN 邻居数（k=10/15/20）和空间半径倍增系数（×1.0/1.25/1.5）共 6 种参数组合，记录每种设置下高免疫抑制区域的占比变化。
+敏感性分析（v2 连续指标版本）扫描了 kNN 邻居数（k=10/15/20）和空间半径倍增系数（×1.0/1.25/1.5）共 6 种参数组合，采用两个连续性稳健指标衡量结果稳定性：
+- `spearman_rho`：衡量全局评分排序的一致性，不受硬截断影响；
+- `weighted_jaccard`：基于 Min-Max 归一化连续向量计算，对高分区域天然加权。
 
-关键判断标准：若 `niche_pct` 在不同参数下的变化幅度小（如均在 15%–25% 范围内波动），则说明 niche 识别结果**对参数选择不敏感**，结论具有稳健性。
+关键判断标准：若 `spearman_rho > 0.8` 且 `weighted_jaccard > 0.6`，则说明 niche 识别结果**对参数选择不敏感**，结论具有稳健性。
 
 **揭示的生物学现象**：
 
@@ -324,7 +394,7 @@ Cell2location 第二阶段（空间建模）的训练损失曲线，同样展示
 
 **揭示的生物学现象**：
 
-该表量化展示了"免疫抑制生态位 cluster"与其他 cluster 在免疫抑制特征上的差异程度。==若目标 cluster 的 `combined_rank` 远低于次低 cluster，则说明免疫抑制信号的空间集中性非常突出，具有明显的"hot spot"特征。==
+该表量化展示了"免疫抑制生态位 cluster"与其他 cluster 在免疫抑制特征上的差异程度。若目标 cluster 的 `combined_rank` 远低于次低 cluster，则说明免疫抑制信号的空间集中性非常突出，具有明显的"hot spot"特征。
 
 ---
 
@@ -340,14 +410,23 @@ Cell2location 第二阶段（空间建模）的训练损失曲线，同样展示
 | `mean_high` | 该基因在 `niche_high` spot 中的平均 log1p 表达量 |
 | `mean_low` | 该基因在 `niche_low` spot 中的平均 log1p 表达量 |
 | `log2_fc` | log₂(mean_high+1) - log₂(mean_low+1)，衡量在免疫抑制区域的富集倍数 |
+| `frac_high` | `niche_high` 组中检出该基因（表达>0）的 spot 比例 |
+| `frac_low` | `niche_low` 组中检出该基因（表达>0）的 spot 比例 |
+| `delta_frac` | `frac_high - frac_low`：检出率差值（弥补均值 log2FC 对稀有基因不敏感的缺陷） |
+| `composite_score` | 综合排序分数（0.5×norm(log2FC) + 0.5×norm(delta_frac)） |
+| `pvalue` | Wilcoxon 秩和检验 p 值 |
+| `fdr` | BH-FDR 校正后的 p 值 |
 
-按 `log2_fc` 降序排列，默认保留前 80 个基因。
-
-`log1p` 是一个组合数学函数，它的全称是 **logarithm of (1 + x)**。其数学公式为：$y = \ln(x + 1)$ ，避免极端值和零值的影响。
+按 `composite_score` 降序排列。
 
 **如何理解**：
 
-`log2_fc > 0` 的基因在免疫抑制生态位中特异性高表达；==`log2_fc` 越大，该基因在免疫抑制区域的富集越强。==这些基因构成了免疫抑制微生态位的**转录特征签名（Signature）**。
+本流程采用**三层筛选策略**：
+- **Layer 1**（Wilcoxon + FDR + 综合排序）：筛选条件 FDR<0.05 且（log2FC>0.5 OR delta_frac>0.10）
+- **Layer 2**（先验功能基因集 AUC 检验）：Treg/TAM/CAF 三组先验基因中 AUC>0.6 且 delta_frac>0.05 的强制合并
+- **Layer 3**（Gini Index 特异性评分）：Gini>0.3 且 log2FC>0，用于检测 FOXP3 等局灶性高表达稀有免疫基因
+
+`delta_frac` 是针对 Visium spot-level 数据的关键补充维度——由于每个 spot 覆盖 5-50 个细胞，FOXP3 等稀有 Treg 标志基因因细胞稀释效应在大多数 spot 中为 0，仅用均值 log2FC 无法检出；`delta_frac` 度量"niche_high 组有更多 spot 能检出该基因"，弥补了这一缺陷。
 
 **揭示的生物学现象**：
 
@@ -373,13 +452,13 @@ Cell2location 第二阶段（空间建模）的训练损失曲线，同样展示
 
 #### `spatial_hepatocyte.png`
 
-**内容**：Hepatocyte 细胞比例在切片空间坐标中的分布，viridis 色标（深色=低，亮色=高）。
+**内容**：Hepatocyte 细胞比例在切片空间坐标中的分布，使用 Yellow-Black-Purple 渐变色标（paper_ybp 配色：深紫=低，黑色=中，亮黄=高）。
 
-**如何理解**：高 Hepatocyte 比例区域（亮色）对应肿瘤实质，即肝癌细胞密集区；低比例区域对应肿瘤间质（免疫浸润区、基质区）。此图是定义肿瘤核心区域的空间依据。
+**如何理解**：高 Hepatocyte 比例区域（亮黄色）对应肿瘤实质，即肝癌细胞密集区；低比例区域（深紫色）对应肿瘤间质（免疫浸润区、基质区）。此图是定义肿瘤核心区域的空间依据。
 
 #### `spatial_treg.png`
 
-**内容**：Treg 细胞比例的空间分布图（viridis 色标）。
+**内容**：Treg 细胞比例的空间分布图（paper_ybp 色标，亮黄色区域为 Treg 富集热点）。
 
 **如何理解**：Treg 在肝癌中的分布通常并非均匀弥散，而是局灶性富集在特定区域（如肿瘤边界或免疫浸润区）。识别 Treg 富集的"热点"区域是本研究的核心目标之一。
 
@@ -387,7 +466,7 @@ Cell2location 第二阶段（空间建模）的训练损失曲线，同样展示
 
 #### `spatial_myeloid.png` / `spatial_fibroblast.png`
 
-**内容**：Myeloid（髓系细胞）和 Fibroblast（成纤维细胞）比例的空间分布。
+**内容**：Myeloid（髓系细胞）和 Fibroblast（成纤维细胞）比例的空间分布（paper_ybp 色标）。
 
 **揭示的生物学现象**：
 - Myeloid 细胞（包括肿瘤相关巨噬细胞 TAM）通常与 Treg 共分布，构成 Treg 招募与维持的细胞环境（CCL22-CCR4 轴）
@@ -395,15 +474,15 @@ Cell2location 第二阶段（空间建模）的训练损失曲线，同样展示
 
 #### `spatial_immunosuppressive_niche_score.png`
 
-**内容**：综合免疫抑制 niche 评分的空间分布（magma 色标，深紫色→亮黄色代表评分从低到高）。
+**内容**：综合免疫抑制 niche 评分的空间分布，使用 Yellow-Black-Purple 渐变色标（paper_ybp 配色：深紫=低分，黑色=中等，亮黄=高分热点）。
 
-**如何理解**：magma 色标的选择使高评分区域（免疫抑制热点）在视觉上非常突出。整个切片的"评分地图"直观揭示了免疫抑制压力的空间分布格局。
+**如何理解**：paper_ybp 色标的选择使高评分区域（免疫抑制热点）在视觉上非常突出（亮黄色）。整个切片的"评分地图"直观揭示了免疫抑制压力的空间分布格局，配色与参考论文 Expression 热图风格一致。
 
 **揭示的生物学现象**：高评分区域即免疫抑制微生态位的空间轮廓，该区域通常位于肿瘤实质与免疫浸润区的交界地带（即免疫细胞进入肿瘤的"前哨区域"），是制定靶向免疫治疗策略时需要重点关注的空间区域。
 
 #### `spatial_neighborhood_clusters.png`
 
-**内容**：Leiden 邻域组成聚类结果的空间分布图，每个 cluster 用不同颜色标识（tab20 色板）。
+**内容**：Leiden 邻域组成聚类结果的空间分布图，每个 cluster 用不同颜色标识（高饱和度离散色板，仿论文风格）。
 
 **如何理解**：这是分析方法的"中间过程可视化"，展示无监督聚类对肿瘤组织空间结构的划分。空间上相邻且颜色相同的 spot 组成一个具有相似局部细胞组成的"邻域"。
 
@@ -427,17 +506,13 @@ Cell2location 第二阶段（空间建模）的训练损失曲线，同样展示
 
 **揭示的生物学现象**：肿瘤的"边界区域"（tumor_edge）通常是免疫细胞浸润最活跃但同时免疫抑制最强烈的地带，是肿瘤-免疫细胞相互作用的主要战场。
 
-#### `hepatocyte_vs_treg_niche_score.png` ==（改）==
+#### `hepatocyte_vs_treg_niche_score.png`
 
 **内容**：Hepatocyte 比例（x 轴）vs Treg 比例（y 轴）散点图，颜色编码综合 niche 评分（magma 色标），虚线标注 75 百分位分界线划分四象限。
 
 **如何理解**：重点关注右上象限（Hepatocyte 高 + Treg 高）中颜色最深的点，这些 spot 是肿瘤实质与 Treg 共定位最明显的区域。
 
 **揭示的生物学现象**：免疫细胞（包括 Treg）无法突破物理屏障，只能在肿瘤核心（高 Hepatocyte 区）的外围、间质区或侵袭边缘（边缘通常 Hepatocyte 比例较低，被大量成纤维细胞等基质占据）大量聚集。这通常与肿瘤外围致密的细胞外基质（如高表达的胶原蛋白、平滑肌肌动蛋白 ACTA2 等 CAF 标志物）有关。
-
-1. 将论文或报告的落脚点从“Treg 突破物理屏障进入核心”修正为“**Treg 与间质细胞在肿瘤物理边界形成高密度的免疫抑制隔离带（Niche）**”。这种表型在 HCC 中不仅极其常见，而且是介导免疫治疗耐药的关键机制。
-
-2. **探索基质重塑信号：** 既然 Treg 进不去实质，这说明间质（Stroma）区域存在强烈的阻挡信号。建议针对左上象限的这些高分 spots，提取它们的基因表达谱，重点观察那些介导细胞外基质硬化和基质重塑的基因（我们之前讨论过的那些 CAF 标志物）。
 
 #### `distance_to_hep_high_vs_niche_score.png`
 
@@ -453,7 +528,7 @@ Cell2location 第二阶段（空间建模）的训练损失曲线，同样展示
 
 **如何理解**：若 `stroma_immune` 或 `tumor_edge` 区域的箱体中位线最高，说明免疫抑制核心集中在免疫浸润区而非纯肿瘤实质，提示 Treg 的主要作用位点在"肿瘤-免疫交界面"。
 
-#### `celltype_niche_correlation.png`  ==（改：名字丑）==
+#### `celltype_niche_correlation.png`
 
 **内容**：各细胞类型比例与 niche 评分之间的 Pearson 相关系数热图（vlag 配色：红色=正相关，蓝色=负相关）。
 
@@ -464,14 +539,14 @@ Cell2location 第二阶段（空间建模）的训练损失曲线，同样展示
 - **Treg 与 Hepatocyte 正相关或负相关**：揭示肿瘤细胞与 Treg 的空间关联模式（肿瘤是否主动招募 Treg 入侵实质）
 - **Fibroblast 与 Myeloid 正相关**：提示 CAF-TAM 共定位在基质区形成双重免疫屏障
 
-#### `lr_communication_heatmap.png` ==（颜色丑）==
+#### `lr_communication_heatmap.png`
 
 **内容**：配体-受体（L-R）通讯分析热图，共两个子图：
 
-- **左图**：7 个关键 L-R 信号对（行）在 `Niche-High` vs `Niche-Low` 两组（列）中的归一化信号强度热图（YlOrRd 色标）
+- **左图**：关键 L-R 信号对（行）在 `Niche-High` vs `Niche-Low` 两组（列）中的归一化信号强度热图（YlOrRd 色标）
 - **右图**：每个 L-R 对的 log₂FC（Niche-High/Niche-Low），红色=在免疫抑制 niche 中上调，蓝色=下调
 
-**7 个关键 L-R 信号对及其生物学意义**：
+**关键 L-R 信号对及其生物学意义**：
 
 | L-R 对 | 信号通路 | 生物学功能 |
 |--------|----------|-----------|
@@ -482,201 +557,115 @@ Cell2location 第二阶段（空间建模）的训练损失曲线，同样展示
 | IL10–IL10RA | 抗炎细胞因子轴 | Treg 和 TAM 分泌 IL-10，通过 IL10RA 信号在局部造成免疫耐受环境 |
 | TIGIT–NECTIN2 | 免疫检查点 | Treg 和耗竭 T 细胞表达 TIGIT，与 APC 上的 NECTIN2 结合触发抑制信号 |
 | LAG3–MHC-II | 免疫检查点 | LAG3 结合 MHC-II 分子，与 TIGIT/PD-1 协同参与 T 细胞耗竭 |
-
-**如何理解**：
-
-左图中颜色越深说明该 L-R 对的通讯信号（配体基因表达 × 受体基因表达的乘积均值）越强；右图红色柱子说明该信号在免疫抑制 niche 中显著富集（log₂FC > 0）。
+| SPP1–CD44 | 骨桥蛋白轴 | TAM 分泌骨桥蛋白 SPP1，结合 CD44 促进肿瘤侵袭和基质重塑 |
+| MIF–CD74 | 炎症调控 | 巨噬细胞迁移抑制因子，在 Visium 级别信号可检测 |
 
 **揭示的生物学现象**：
 
 该图将描述性的"Treg-TAM-CAF 共定位"结论升级为**机制性结论**——免疫抑制生态位中富集的信号通路揭示了细胞间通讯网络：CXCL12-CXCR4 和 CCL22-CCR4 是招募信号，TGF-β 和 IL-10 是维持信号，PD-1/TIGIT/LAG3 信号轴是效应 T 细胞耗竭的执行机制。这一"招募-维持-耗竭"三级信号网络完整地刻画了肝癌免疫逃逸的分子机制。
 
+#### `niche_signature_volcano.png`
+
+**内容**：火山图（Volcano Plot），横轴为 log2FC（niche_high vs niche_low），纵轴为 -log10(FDR)。
+- 红色点：显著上调基因（log2FC > 0.5 且 FDR < 0.05）
+- 蓝色点：显著下调基因
+- 灰色点：不显著基因
+- **选择性标注**：只标注超过显著性阈值的先验目标基因（FOXP3、TGFB1 等），以及在阈值附近（±60% FC 范围或 ±50% FDR 范围）的先验目标基因，避免图中文字拥挤
+
+**如何理解**：右上角（高 log2FC、高 -log10FDR）的基因是在免疫抑制 niche 中最显著上调的候选分子。稀有免疫基因（如 FOXP3）由于 Visium 稀释效应，FC 值通常偏低，需配合 `niche_fraction_scatter.png` 一起解读。
+
+#### `niche_fraction_scatter.png`
+
+**内容**：检出率差值散点图，横轴为 log2FC，纵轴为 Δfrac（检出率差值 = frac_high - frac_low）。
+- 红色点：双重显著（log2FC > 0.5 且 Δfrac > 0.10）
+- 橙色点：仅检出率富集（Δfrac > 0.10 但 FC 不高）—— 典型稀有免疫基因（FOXP3）
+- 蓝色点：仅 FC 高（可能是高表达管家基因）
+- 灰色点：两者均不显著
+- **选择性标注**：只标注超过阈值的先验目标基因或阈值附近的基因，避免标注过于密集
+
+**如何理解**：
+
+火山图以均值 log2FC 为横轴，在 Visium spot-level bulk 数据中，FOXP3 等稀有细胞标志基因的均值被大量 0 值压低，即使这些基因在 niche_high 中有更高的检出率（更多 spot 能检测到表达），也无法在火山图上突显。本图以 Δfrac 为纵轴，直接展示"niche_high 相对 niche_low 有多少更多 spot 能检出该基因"，是火山图的重要补充视角。
+
+**揭示的生物学现象**：橙色区域（仅 Δfrac 显著）中的基因通常是低细胞丰度但具有功能重要性的稀有免疫细胞标志基因，这类基因在传统的均值 log2FC 分析中往往被漏掉，但在空间免疫抑制生态位中具有重要的生物学意义。
+
 #### `sensitivity_niche_stability.png`
 
-**内容**：敏感性分析结果图（对应 `sensitivity_analysis.csv`），包含两个子图：左图为不同 kNN 邻居数下 niche-high spot 占比，右图为不同半径倍增系数下的占比，红色虚线标注主分析参数。
+**内容**：敏感性分析结果图（v2 连续指标），展示两个参数维度（kNN 邻居数 / 半径倍增系数）的 Spearman ρ 和加权 Jaccard 两指标稳定性矩阵（2×2 子图）。
 
-**如何理解**：若各条形图高度接近红色虚线且变化幅度小，则说明结论稳健。
+**如何理解**：若各格子的数值接近 1（颜色深），则说明参数扰动对 niche 评分排序影响极小，结论稳健。
 
----
+#### `param_scan_deg_stability_heatmap.png`
 
-## 三、Step 3 — 差异表达分析（`run_de_analysis.py`）
-
-### 3.1 `spatial_signature_genes.txt`（也在 `spatial_niche/` 下有副本）
-
-**文件格式**：纯文本，每行一个 HGNC 基因名，默认 50 个基因
-
-**内容说明**：
-
-使用 Wilcoxon 秩和检验，比较 `niche_high`（免疫抑制 spot）与 `niche_low`（其他 spot）之间的基因表达差异，提取在免疫抑制区域中特异高表达的前 50 个基因。
-
-表达量矩阵经过 CP10K 归一化和 log1p 变换以消除测序深度偏差。Wilcoxon 检验是非参数检验，不假设数据服从正态分布，适用于单细胞/空间转录组数据的高噪声特性。
+**内容**：k × niche_high_quantile 二维参数扫描热图，颜色编码不同参数组合下显著差异基因（FDR<0.05 且 log2FC>0.5）的数量。
 
 **如何理解**：
 
-该文件是整个分析流程中连接**空间转录组发现**与**临床队列验证**的关键接口。基因列表直接输入 R 脚本用于 TCGA-LIHC 队列的 ssGSEA 打分。
+- **横轴**：`niche_high_quantile`（0.70 / 0.75 / 0.80 / 0.85）
+- **纵轴**：kNN 邻居数 k（8 / 10 / 15 / 20 / 25）
+- **颜色**：颜色越深说明该参数组合下发现的显著 DEG 越多
 
-**揭示的生物学现象**：
-
-相比 Step 2 中基于 log2FC 的特征基因（`immunosuppressive_niche_signature_genes_ranked.csv`），本文件通过 Wilcoxon 统计检验进一步筛选，保留了在统计上显著高表达的基因，降低了噪声基因的干扰。这些基因代表了肝癌空间免疫抑制微生态位最可靠的分子标志物，是具有潜在临床转化价值的候选靶点或生物标志物。
+选参标准：**颜色最深且处于"高原"区域**（与相邻格子结果相近）的参数组合为推荐；若主流程参数（k=15, q=0.80）位于高原区，则参数选择合理，结论稳健。
 
 ---
 
-## 四、Step 4–5 — TCGA 生存分析（`tcga_survival_analysis.R`）
+## 三、Step 3（可选）— TCGA 生存分析（`tcga_survival_analysis.R`）
 
-### 4.1 `tcga_signature_score.csv`
+基于 Step 2 生成的签名基因列表（`spatial_signature_genes.txt`），在 TCGA-LIHC 肝癌队列中进行 ssGSEA 评分和生存分析。本分析为可选步骤，详见 `code/pipeline/tcga_survival_analysis.R`。
 
-**文件格式**：CSV 表格
+主要输出文件：
 
-**列说明**：
-
-| 列名 | 含义 |
+| 文件 | 内容 |
 |------|------|
-| 患者 ID（TCGA barcode） | 唯一患者标识符（如 `TCGA-BC-A10T`） |
-| `score` | ssGSEA（单样本基因集富集分析）评分（通常在 -1 到 1 之间，经过归一化） |
-
-**如何理解**：
-
-ssGSEA 将空间转录组发现的签名基因集（50–80 个基因）作为"感兴趣的基因集"，对 TCGA-LIHC 队列中每位患者的 bulk RNA-seq 表达谱进行单样本富集分析。高 ssGSEA 评分意味着该患者肿瘤中签名基因集整体表达水平高，即其肿瘤微环境具有**与空间转录组发现的免疫抑制生态位相似的分子特征**。
-
-**揭示的生物学现象**：
-
-ssGSEA 分数是将空间发现的免疫抑制微生态位特征"投影"到大队列数据中的量化工具，相当于用一个精确的"免疫抑制程度仪"为每位肝癌患者打分，分数越高代表其肿瘤承受的免疫抑制压力越大。
-
----
-
-### 4.2 `tcga_signature_survival.csv`
-
-**文件格式**：CSV 表格
-
-**列说明**：
-
-| 列名 | 含义 |
-|------|------|
-| 患者 ID | TCGA barcode |
-| `score` | ssGSEA 免疫抑制评分 |
-| `OS` | 总生存时间（overall survival，单位：天） |
-| `OS.event` | 生存状态（1=死亡，0=截尾/存活） |
-| `score_group` | 按中位数或最优截点分组（`high`/`low`） |
-| `age` / `stage` 等 | 临床协变量（用于 Cox 多变量回归校正） |
-
-**如何理解**：
-
-该文件合并了 ssGSEA 评分与 TCGA 临床随访数据，是生存分析的输入数据表。
+| `tcga_signature_score.csv` | 每位患者的 ssGSEA 免疫抑制评分 |
+| `tcga_signature_survival.csv` | 评分 + 临床信息合并表 |
+| `cox_results.txt` | Cox 比例风险回归结果（独立预后验证） |
+| `km_plot.png` | Kaplan-Meier 生存曲线（高/低评分组对比） |
+| `cox_forest_plot.png` | Cox 森林图（多变量独立性展示） |
 
 **揭示的生物学现象**：
 
-通过分组变量 `score_group`，可以比较"免疫抑制高评分组"与"低评分组"患者的生存差异，直接验证"肝癌免疫抑制微环境越强，患者预后越差"这一核心假设。
+ssGSEA 分数是将空间发现的免疫抑制微生态位特征"投影"到大队列数据中的量化工具，相当于用一个精确的"免疫抑制程度仪"为每位肝癌患者打分。若高分组患者的生存时间显著短于低分组，则从流行病学角度证明了**肝癌空间免疫抑制微生态位的临床预后价值**——不仅是一种组织学现象，更是患者生死攸关的临床因素。
 
 ---
 
-### 4.3 `cox_results.txt`
-
-**文件格式**：纯文本，R `summary(coxph(...))` 的标准输出格式
-
-**内容说明**：
-
-多变量 Cox 比例风险模型的回归结果摘要，包含：
-- 各协变量（ssGSEA score、年龄、肿瘤分期）的回归系数（`coef`）
-- 风险比（`exp(coef)`，即 Hazard Ratio，HR）
-- 95% 置信区间
-- Wald 统计量和 p 值
-- 全局模型检验（对数秩检验、似然比检验、Wald 检验）
-
-**如何理解**：
-
-重点关注 ssGSEA score 对应行的 `exp(coef)`（HR）和 p 值：
-
-- **HR > 1 且 p < 0.05**：免疫抑制评分每增加一个单位，死亡风险增加 (HR-1)×100%，该结论在排除年龄和分期等混杂因素后仍成立，说明免疫抑制微生态位特征是**独立预后因子**
-- **HR > 1 但 p > 0.05**：信号方向正确但统计功效不足，可能需要更大样本
-- **HR ≈ 1**：特征基因集与预后无显著关联，需要重新审查签名基因的选择
-
-**揭示的生物学现象**：
-
-多变量 Cox 模型的核心价值在于**独立性检验**。仅有单变量分析（KM曲线）的结论可能被年龄、分期等混杂因素解释，而 Cox 多变量分析控制这些协变量后仍显著，则证明免疫抑制 niche 特征是真正独立的预后驱动因素，具有潜在的**临床转化价值**（如作为预测免疫治疗应答率的生物标志物）。
-
----
-
-### 4.4 `km_plot.png`
-
-**文件格式**：PNG 图像
-
-**内容说明**：
-
-Kaplan-Meier 生存曲线，将 TCGA-LIHC 患者按 ssGSEA 评分分为高分组（`score_high`，红色）和低分组（`score_low`，蓝色），绘制两组的累积生存概率随时间的变化曲线。图中通常包含：
-- 对数秩（log-rank）检验 p 值
-- 风险集（at risk）表格
-- 中位生存时间
-
-**如何理解**：
-
-若高分组曲线始终低于低分组曲线（即高分组生存率更低），且 p < 0.05，则视觉上直接证明免疫抑制程度高与更差的预后相关。曲线间隔距离越大，预后差异越显著。
-
-**揭示的生物学现象**：
-
-KM 曲线是临床研究中最直观的生存差异展示方式。若高免疫抑制评分组的中位生存时间显著短于低分组，则从流行病学角度证明了**肝癌空间免疫抑制微生态位的临床预后价值**——不仅是一种组织学现象，更是患者生死攸关的临床因素。
-
-这一结论的转化意义在于：未来可能通过检测肿瘤活检的免疫抑制相关基因表达谱（如通过 RT-qPCR 或 NanoString 技术），预测患者对免疫检查点抑制剂（PD-1/PD-L1 抗体）的应答概率，指导个性化治疗决策。
-
----
-
-### 4.5 `cox_forest_plot.png`
-
-**文件格式**：PNG 图像
-
-**内容说明**：
-
-Cox 回归森林图（Forest Plot），以图形化方式展示 `cox_results.txt` 中各协变量的风险比：
-- 每行代表一个协变量
-- 矩形（方块）代表点估计 HR，大小通常与样本量/权重成正比
-- 横线代表 95% 置信区间
-- 竖虚线在 HR=1 处标注（无效假设）
-- 若置信区间整体在 HR=1 右侧（不跨越 1），则该因素的效应有统计学意义
-
-**如何理解**：
-
-快速查看：若 ssGSEA score 对应的置信区间水平线完全位于 HR=1 的竖线右侧，则直接在图上确认其统计显著性。图中同时展示年龄、分期的效应，可直观比较各因素的独立效应大小。
-
-**揭示的生物学现象**：
-
-若森林图显示 ssGSEA score 的 HR 和统计显著性与年龄、分期相当或更强，则有力支持免疫抑制微生态位特征作为肝癌独立预后因子的临床价值。
-
----
-
-## 五、分析流程总结与各文件间的逻辑关系
+## 四、分析流程总结与各文件间的逻辑关系
 
 ```
-pre.py
-  └── data/scRNA_reference.h5ad
-  └── data/chc20_visium.h5ad / chc23_visium.h5ad
-          │
-          ▼
-run_preprocessing.py（Step 1）
-  ├── adata_vis_post.h5ad            ─── 反卷积结果（CHC20主分析）
-  ├── adata_vis_post_CHC23.h5ad      ─── 反卷积结果（CHC23验证）
-  ├── spot_cell_proportion.csv       ─── 细胞类型比例表（CHC20）
-  ├── spot_cell_proportion_CHC23.csv ─── 细胞类型比例表（CHC23）
-  ├── t_cell_dotplot_horizontal.png  ─── Treg 鉴定图
-  ├── cross_slice_comparison/        ─── 多切片一致性验证图组
-  └── [训练曲线图]
-          │
-          ▼
-run_spatial_niche_analysis.py（Step 2）
-  ├── spatial_niche/spatial_niche_scores.csv           ─── 核心评分表
+data/scRNA_reference.h5ad
+data/HCC4R/           (Visium Space Ranger 输出)
+data/CHC20_Visium/    (Visium Space Ranger 输出)
+         │
+         ▼
+run_joint_hcc4r_chc20.py  →  run_preprocessing.py (Step 1, joint_mode)
+  ├── scrna_tsne_celltype.png          ─── scRNA 细胞类型 tSNE 图（仿论文 Fig C）
+  ├── scrna_celltype_marker_heatmap.png ─── Marker 基因热图（仿论文 Fig D）
+  ├── t_cell_dotplot_horizontal.png     ─── Treg 标志基因横版气泡图
+  ├── regression_training_history_joint.png ─── 统一 RegressionModel 训练曲线
+  ├── adata_vis_post_HCC4R.h5ad        ─── HCC4R 单独反卷积结果
+  ├── adata_vis_post_CHC20.h5ad        ─── CHC20 单独反卷积结果
+  ├── adata_vis_post_joint.h5ad        ─── 合并结果（含 obs["sample"] 列）
+  ├── spot_cell_proportion_HCC4R.csv   ─── HCC4R spot 细胞比例
+  ├── spot_cell_proportion_CHC20.csv   ─── CHC20 spot 细胞比例
+  ├── spot_cell_proportion_joint.csv   ─── 合并比例表（含 sample 列）
+  ├── shared_genes_joint.txt           ─── 三路共享基因列表
+  └── cross_slice_comparison/          ─── 两切片一致性对比图
+         │
+         ▼
+run_spatial_niche_analysis.py（Step 2，--per-sample-neighbors）
+  ├── spatial_niche/spatial_niche_scores.csv           ─── 核心评分表（含 sample 列）
   ├── spatial_niche/neighborhood_cluster_stats.csv     ─── Leiden 聚类注释统计
   ├── spatial_niche/spatial_niche_parameters.csv       ─── 分析参数记录
-  ├── spatial_niche/sensitivity_analysis.csv           ─── 稳健性验证
-  ├── spatial_niche/immunosuppressive_niche_signature_genes_ranked.csv ─── 签名基因（带排名）
+  ├── spatial_niche/sensitivity_analysis.csv           ─── 稳健性验证（连续指标）
+  ├── spatial_niche/immunosuppressive_niche_signature_genes_ranked.csv ─── 三层筛选签名基因
   ├── spatial_niche/immunosuppressive_niche_signature_genes.txt        ─── 签名基因列表
-  ├── spatial_signature_genes.txt                      ─── 副本（供 R 脚本读取）
-  └── spatial_niche/plots/                             ─── 全套空间可视化图
-          │
-          ▼
-colocation.py + run_de_analysis.py（Step 3）
-  ├── spot_with_coloc_label.csv      ─── 共定位标签（供 DE 分析输入）
-  └── spatial_signature_genes.txt    ─── 统计筛选后的签名基因（更新/确认）
-          │
-          ▼
-tcga_survival_analysis.R（Step 4–5）
+  ├── spatial_niche/prior_gene_set_auc.csv             ─── Layer 2 先验基因 AUC 结果
+  ├── spatial_niche/gini_score_genes.csv               ─── Layer 3 Gini 特异性基因
+  ├── spatial_niche/param_scan_deg_stability.csv       ─── k × quantile 参数扫描数据
+  └── spatial_niche/plots/                             ─── 全套空间可视化图（paper_ybp 配色）
+         │
+         ▼
+tcga_survival_analysis.R（可选，Step 3）
   ├── tcga_signature_score.csv       ─── 每位患者的 ssGSEA 评分
   ├── tcga_signature_survival.csv    ─── 评分 + 临床信息合并表
   ├── cox_results.txt                ─── Cox 回归结果（独立预后验证）
@@ -686,8 +675,10 @@ tcga_survival_analysis.R（Step 4–5）
 
 **核心生物学结论链**：
 
-1. **Cell2location 反卷积**：将混合信号的 Visium spot 分解为细胞类型构成 → 实现空间分辨率的细胞类型定位
-2. **邻域组成聚类**：发现细胞类型共定位的空间生态结构 → 识别 Treg-TAM-CAF 共富集的免疫抑制生态位
-3. **L-R 通讯分析**：揭示生态位内部的细胞间分子通讯 → 将共定位描述升级为 CXCL12-CXCR4、CCL22-CCR4 等具体信号通路的机制证据
-4. **特征基因提取**：将空间发现转化为可量化的基因签名 → 为大队列验证提供分子接口
-5. **TCGA 验证**：将空间转录组（n=2 切片）发现投影到大队列（n≈370） → 证明免疫抑制微生态位具有普遍临床意义和独立预后价值
+1. **Cell2location 联合反卷积**：两张切片（HCC4R + CHC20）使用同一套参考签名反卷积，细胞类型估计在同一参考系下可直接比较，合并后获得更多 spot 样本量，提升统计功效
+2. **空间 kNN 邻域构建（切片内）**：`--per-sample-neighbors` 参数保证空间邻域只在同一切片内建立，保留空间组织结构的生物学意义，不让跨切片 spot 互为物理邻居
+3. **邻域组成聚类**：发现细胞类型共定位的空间生态结构 → 识别 Treg-TAM-CAF 共富集的免疫抑制生态位
+4. **三层基因筛选策略**：Wilcoxon+FDR（Layer 1）+ 先验 AUC（Layer 2）+ Gini 指数（Layer 3），弥补 Visium 稀释效应对稀有免疫基因（FOXP3 等）的不敏感问题
+5. **L-R 通讯分析**：揭示生态位内部的细胞间分子通讯 → 将共定位描述升级为 CXCL12-CXCR4、CCL22-CCR4 等具体信号通路的机制证据
+6. **特征基因提取**：将空间发现转化为可量化的基因签名 → 为大队列验证提供分子接口
+7. **TCGA 验证（可选）**：将空间转录组（HCC4R + CHC20 两张切片）发现投影到大队列（n≈370） → 证明免疫抑制微生态位具有普遍临床意义和独立预后价值

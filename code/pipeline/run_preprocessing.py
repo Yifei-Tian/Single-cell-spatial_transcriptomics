@@ -1,64 +1,71 @@
 """
 ================================================================================
 脚本名称: run_preprocessing.py
-功能概述: 数据预处理与 Cell2location 双切片反卷积 —— Step 1
+功能概述: 数据预处理与 Cell2location 反卷积（单切片 / 联合分析两种模式）—— Step 1
 ================================================================================
 
 【整体任务说明】
-    本脚本是分析流程的 Step 1，串联 preprocessing.py 模块中的所有核心函数，
-    对 CHC20（主分析）和 CHC23（独立验证）两张切片依次完成以下 9 个步骤：
+    本脚本是分析流程的 Step 1，串联 preprocessing.py 模块中的所有核心函数。
+    支持两种运行模式：
 
-      Step 1  加载 scRNA-seq 参考数据，执行基础质控（过滤低表达细胞/基因）；
-      Step 2  加载 CHC20 / CHC23 Visium 空间数据，保留 is_tissue=1 的有效 spot；
-      Step 3  取 scRNA 与两张 Visium 切片的共享基因子集，确保建模基因空间一致；
-      Step 4  提取 T/NK 细胞亚群，将指定聚类簇（默认 "9" / "9.0"）重注释为 Treg；
-              绘制横版 Treg 标志基因气泡图（dotplot），便于论文并排展示；
-      Step 5  用 CHC20 scRNA-seq 训练 RegressionModel（第一阶段参考签名学习），
-              保存 CHC20 训练曲线图；
-      Step 6  用 CHC20 的参考签名运行 Cell2location 空间建模（第二阶段反卷积），
-              获得每个 spot 的细胞丰度估计，保存主分析结果；
-      Step 7  独立为 CHC23 训练 RegressionModel（采用更保守的早停参数：
-              patience=50, min_delta=5e-5, max_epochs=400，防止过早收敛），
-              并对 CHC23 运行空间建模，生成验证切片结果；
-      Step 8  生成 CHC20 / CHC23 多切片一致性对比图（各细胞类型比例条形图），
-              保存至 results/cross_slice_comparison/；
-      Step 9  保存两张切片各自的 scRNA AnnData 和共享基因列表。
+    ━━━ 模式 A：单切片分析（默认 / 历史兼容）━━━
+    对单张 Visium 切片（如 CHC20）完成预处理与反卷积，可附带一张可选验证切片。
+      Step 1  加载 scRNA-seq 参考数据，执行基础质控；
+      Step 2  加载主分析 Visium 空间数据；
+      Step 3  取 scRNA 与切片的共享基因子集；
+      Step 4  提取 T/NK 细胞亚群，将指定聚类簇重注释为 Treg；
+              绘制横版 Treg 标志基因气泡图（dotplot）；
+      Step 5  训练 RegressionModel（参考签名学习）；
+      Step 6  Cell2location 空间建模（反卷积），保存 adata_vis_post.h5ad；
+      Step 7  （可选）对第二张验证切片独立训练并运行空间建模；
+      Step 8  （可选）生成多切片一致性对比图；
+      Step 9  保存 scRNA AnnData 和共享基因列表。
 
-【多切片设计说明】
-    CHC20 为主分析切片（用于 Step 2 空间 niche 分析）；
-    CHC23 为独立验证切片（由 run_chc23_validation.py 消费），两者分别独立
-    训练参考签名模型，以排除样本间批次效应对反卷积结果的干扰。
+    ━━━ 模式 B：联合分析（HCC4R + CHC20，joint_mode=True）━━━
+    确认两数据集 batch effect 极小后，用同一套 scRNA 参考训练一次 RegressionModel，
+    得到统一的 cell_state_df，分别对 HCC4R 和 CHC20 做 Cell2location 反卷积，
+    然后合并两张切片的 spot 级结果用于联合下游分析：
+      Step 1  加载 scRNA-seq 参考数据；
+      Step 2  加载 HCC4R + CHC20 两张 Visium 空间数据；
+      Step 3  取 scRNA 与两切片的三路共同基因子集（确保反卷积基因空间完全一致）；
+      Step 4  提取 T/NK 细胞亚群，重注释 Treg；
+      Step 5  用共同基因子集训练统一 RegressionModel（一次训练，共享签名）；
+      Step 6  用统一签名分别对 HCC4R 和 CHC20 做 Cell2location 反卷积；
+      Step 7  合并两切片的 spot 级反卷积结果（加 sample 列标记来源），
+              保存 adata_vis_post_joint.h5ad 供联合 niche 分析使用；
+              同时保留每张切片的单独 h5ad（adata_vis_post_HCC4R.h5ad 等）；
+      Step 8  生成联合细胞组成对比图；
+      Step 9  保存共享基因列表和 scRNA AnnData。
+
+    【联合分析设计说明】
+    批次效应极小时，联合分析可获得更大样本量（更多 spot），提升统计功效。
+    下游 run_spatial_niche_analysis.py 在读取合并后的 adata_vis_post_joint.h5ad 时，
+    需通过 adata.obs["sample"] 识别切片来源，并在建立 kNN 空间邻域时限制在
+    同一切片内（通过 --per-sample-neighbors 参数激活），避免跨切片物理邻居错误。
 
 【输入文件】
     data/scRNA_reference.h5ad    - scRNA-seq 参考数据（pre.py 生成）
-    data/chc20_visium.h5ad       - CHC20 Visium 空间转录组数据（pre.py 生成）
-                                   或直接读取 data/CHC20_Visium/ Space Ranger 目录
-    data/chc23_visium.h5ad       - CHC23 Visium 空间转录组数据（pre.py 生成）
-                                   或直接读取 data/CHC23_Visium/ Space Ranger 目录
+    data/CHC20_Visium/           - CHC20 Visium Space Ranger 输出目录
+    data/HCC4R/                  - HCC4R Visium Space Ranger 输出目录
 
-【输出文件】
-    results/adata_vis_post.h5ad               - CHC20 反卷积后的空间 AnnData（主分析输入）
-    results/adata_vis_post_CHC20.h5ad         - 同上，带 CHC20 后缀的副本
-    results/adata_vis_post_CHC23.h5ad         - CHC23 反卷积后的空间 AnnData（验证切片）
-    results/adata_sc_post.h5ad                - CHC20 scRNA-seq 参考数据（含后验签名）
-    results/adata_sc_post_CHC20.h5ad          - 同上，带 CHC20 后缀的副本
-    results/adata_sc_post_CHC23.h5ad          - CHC23 scRNA-seq 参考数据（含后验签名）
-    results/spot_cell_proportion_CHC20.csv    - CHC20 每个 spot 的细胞类型比例表
-    results/spot_cell_proportion_CHC23.csv    - CHC23 每个 spot 的细胞类型比例表
-    results/shared_genes_CHC20.txt            - CHC20 scRNA × Visium 共享基因列表
-    results/shared_genes_CHC23.txt            - CHC23 scRNA × Visium 共享基因列表
-    results/regression_training_history_CHC20.png - CHC20 RegressionModel 训练曲线
-    results/regression_training_history_CHC23.png - CHC23 RegressionModel 训练曲线
-    results/treg_bubble.png                   - Treg 标志基因横版气泡图
-    results/t_cell_dotplot.png                - T 细胞聚类气泡图（竖版回退版本）
-    results/cross_slice_comparison/           - 多切片一致性对比图（细胞类型比例）
-    results/run_preprocessing.log            - 全流程运行日志
+【输出文件（联合分析模式，保存于 results/joint_HCC4R_CHC20/）】
+    adata_vis_post_HCC4R.h5ad            - HCC4R 单独反卷积结果
+    adata_vis_post_CHC20.h5ad            - CHC20 单独反卷积结果
+    adata_vis_post_joint.h5ad            - 两切片合并结果（含 obs["sample"] 列）
+    adata_vis_post.h5ad                  - 同上，标准名称副本（供下游默认读取）
+    spot_cell_proportion_HCC4R.csv       - HCC4R spot 细胞类型比例
+    spot_cell_proportion_CHC20.csv       - CHC20 spot 细胞类型比例
+    spot_cell_proportion_joint.csv       - 合并比例表（含 sample 列）
+    shared_genes_joint.txt               - 三路共享基因列表
+    regression_training_history_joint.png - 统一 RegressionModel 训练曲线
+    t_cell_dotplot_horizontal.png        - Treg 标志基因横版气泡图
+    cross_slice_comparison/              - 两切片细胞组成对比图
+    run_preprocessing.log                - 全流程运行日志
 
 【依赖关系】
     上游：pre.py（生成 .h5ad 数据文件）
-    下游：run_spatial_niche_analysis.py（读取 adata_vis_post.h5ad 进行 Niche 分析）
-          run_chc23_validation.py（读取 adata_vis_post_CHC23.h5ad 进行独立验证）
-          colocation.py / run_de_analysis.py（读取细胞比例表和空间数据）
+    下游：run_spatial_niche_analysis.py（读取 adata_vis_post.h5ad 或
+          adata_vis_post_joint.h5ad 进行 Niche 分析）
 
 【参考文献】
     - Kleshchevnikov et al., Nature Biotechnology, 2022 (Cell2location)
@@ -180,6 +187,285 @@ def plot_treg_dotplot_horizontal(
     fig.savefig(save_path, dpi=dpi, bbox_inches="tight")
     plt.close(fig)
     LOGGER.info("横版 Treg 气泡图已保存: %s", save_path)
+
+
+# ============================================================
+# 辅助函数：tSNE 细胞类型图（仿论文 Figure C 风格）
+# ============================================================
+
+def plot_scrna_tsne_celltype(
+    adata_sc,
+    celltype_col: str,
+    cluster_col: str,
+    save_path: Path,
+    dpi: int = 180,
+) -> None:
+    """
+    绘制 scRNA-seq tSNE 细胞类型分布图，风格仿照参考论文 Figure C（1.png）。
+
+    图表特征：
+      - 每个细胞在 tSNE 坐标系中绘制为一个点（s=6，半透明）
+      - 每种细胞类型使用高饱和度固定颜色，与论文 tSNE 图配色风格一致
+      - 每个细胞类型在图中标注聚类编号和类型名称
+      - 右侧图例展示颜色-类型对应关系
+      - 坐标轴标注 tSNE 1 / tSNE 2，带箭头指示方向
+
+    【配色说明】
+    参照论文图 C（tSNE 细胞类型聚类图）的色板设计：高饱和度离散色板，
+    优先高对比度颜色，避免相邻细胞类型颜色混淆。
+
+    参数
+    ----
+    adata_sc     : scRNA-seq AnnData，需包含 obsm["X_tsne"] 和 obs[celltype_col]
+    celltype_col : 细胞类型列名（如 "final_celltype"）
+    cluster_col  : 聚类编号列名（如 "res.3"），用于标注聚类编号（可为 None 跳过）
+    save_path    : 图片保存路径
+    dpi          : 输出分辨率
+    """
+    import matplotlib.patches as mpatches
+
+    # 检查 tSNE 坐标是否存在，若不存在则尝试 UMAP 或跳过
+    if "X_tsne" in adata_sc.obsm:
+        embed_key = "X_tsne"
+        xlabel, ylabel = "tSNE 1", "tSNE 2"
+    elif "X_umap" in adata_sc.obsm:
+        embed_key = "X_umap"
+        xlabel, ylabel = "UMAP 1", "UMAP 2"
+    else:
+        LOGGER.warning("Neither X_tsne nor X_umap found; skipping tSNE celltype plot.")
+        return
+
+    if celltype_col not in adata_sc.obs.columns:
+        LOGGER.warning("Cell type column '%s' not found; skipping tSNE plot.", celltype_col)
+        return
+
+    # 高饱和度离散色板（仿论文 tSNE 图颜色风格）
+    PAPER_CLUSTER_COLORS = [
+        "#2ca02c",  # 绿色（T cell）
+        "#9467bd",  # 紫色（Myeloid）
+        "#1f77b4",  # 蓝色（Malignant）
+        "#d62728",  # 红色
+        "#ff7f0e",  # 橙色（NK）
+        "#8c564b",  # 棕色
+        "#e377c2",  # 粉色
+        "#7f7f7f",  # 灰色
+        "#bcbd22",  # 黄绿色
+        "#17becf",  # 青色
+        "#aec7e8",  # 浅蓝
+        "#ffbb78",  # 浅橙
+        "#98df8a",  # 浅绿
+        "#ff9896",  # 浅红
+        "#c5b0d5",  # 浅紫
+        "#c49c94",  # 浅棕
+        "#f7b6d2",  # 浅粉
+        "#c7c7c7",  # 浅灰
+        "#dbdb8d",  # 浅黄绿
+        "#9edae5",  # 浅青
+        "#393b79",  # 深蓝
+        "#637939",  # 深绿
+        "#8c6d31",  # 深棕
+        "#843c39",  # 深红棕
+    ]
+
+    celltypes = sorted(adata_sc.obs[celltype_col].unique())
+    color_map = {ct: PAPER_CLUSTER_COLORS[i % len(PAPER_CLUSTER_COLORS)]
+                 for i, ct in enumerate(celltypes)}
+
+    coords = adata_sc.obsm[embed_key]
+    ct_labels = adata_sc.obs[celltype_col].values
+    colors = [color_map.get(ct, "#bdbdbd") for ct in ct_labels]
+
+    fig, ax = plt.subplots(figsize=(9, 7))
+    ax.scatter(
+        coords[:, 0], coords[:, 1],
+        c=colors, s=5, alpha=0.6, linewidths=0,
+    )
+
+    # 标注每种细胞类型的中心位置
+    for ct in celltypes:
+        mask = ct_labels == ct
+        if mask.sum() == 0:
+            continue
+        cx = float(coords[mask, 0].mean())
+        cy = float(coords[mask, 1].mean())
+        ax.text(cx, cy, ct, fontsize=7.5, ha="center", va="center",
+                fontweight="bold",
+                bbox=dict(boxstyle="round,pad=0.1", fc="white", ec="none", alpha=0.6))
+
+    # 图例（右侧）
+    handles = [
+        mpatches.Patch(facecolor=color_map[ct], label=ct, edgecolor="none")
+        for ct in celltypes
+    ]
+    ax.legend(
+        handles=handles, loc="upper left", bbox_to_anchor=(1.01, 1.0),
+        frameon=False, fontsize=7, ncol=1, title="Cell type",
+        title_fontsize=8,
+    )
+
+    ax.set_xlabel(xlabel, fontsize=9)
+    ax.set_ylabel(ylabel, fontsize=9)
+    ax.set_title("Single-cell Landscape: Cell Type Distribution", fontsize=11)
+    ax.tick_params(left=False, bottom=False, labelleft=False, labelbottom=False)
+    for spine in ax.spines.values():
+        spine.set_visible(False)
+
+    # 添加坐标轴箭头（仿论文风格）
+    ax.annotate("", xy=(0.08, 0.0), xytext=(0.0, 0.0),
+                xycoords="axes fraction", textcoords="axes fraction",
+                arrowprops=dict(arrowstyle="-|>", color="black", lw=1.2))
+    ax.annotate("", xy=(0.0, 0.08), xytext=(0.0, 0.0),
+                xycoords="axes fraction", textcoords="axes fraction",
+                arrowprops=dict(arrowstyle="-|>", color="black", lw=1.2))
+
+    fig.tight_layout()
+    fig.savefig(save_path, dpi=dpi, bbox_inches="tight")
+    plt.close(fig)
+    LOGGER.info("tSNE 细胞类型图已保存: %s", save_path)
+
+
+# ============================================================
+# 辅助函数：细胞类型 Marker 基因热图（仿论文 Figure D 风格）
+# ============================================================
+
+def plot_celltype_marker_heatmap(
+    adata_sc,
+    celltype_col: str,
+    marker_genes: dict[str, list[str]],
+    save_path: Path,
+    dpi: int = 180,
+) -> None:
+    """
+    绘制细胞类型 Marker 基因平均表达热图，风格仿照参考论文 Figure D（2.png）。
+
+    图表特征：
+      - X 轴：细胞类型（按生物学相关性排列）
+      - Y 轴：marker 基因（按细胞类型分组排列）
+      - 颜色：Z-score 标准化后的平均表达量，使用 Yellow-Black-Purple 渐变色
+        （高表达 = 亮黄，低表达 = 深紫，零表达 = 黑色）
+      - 与参考论文 2.png 配色完全一致
+
+    【配色说明】
+    使用 Yellow-Black-Purple 三色渐变（paper_ybp），与论文图 D 的 Expression
+    配色一致：
+      低值 → 深紫色 (#3a0063)
+      中值 → 纯黑色 (#000000)
+      高值 → 亮黄色 (#f5e642)
+
+    参数
+    ----
+    adata_sc     : scRNA-seq AnnData（已归一化）
+    celltype_col : 细胞类型列名（如 "final_celltype"）
+    marker_genes : dict，键为细胞类型/组名，值为该类型的 marker 基因列表
+                   例如：{"T cell": ["IL7R","CD3G","CD2"], "Myeloid": ["LYZ","AIF1"]}
+    save_path    : 图片保存路径
+    dpi          : 输出分辨率
+    """
+    import scipy.sparse as sp_mod
+    from matplotlib.colors import LinearSegmentedColormap
+    from scipy.stats import zscore as scipy_zscore
+
+    # Yellow-Black-Purple 渐变色（仿论文 Figure D 配色）
+    _PAPER_YBP = LinearSegmentedColormap.from_list(
+        "paper_ybp",
+        ["#3a0063", "#000000", "#f5e642"],   # purple → black → yellow
+        N=256,
+    )
+
+    if celltype_col not in adata_sc.obs.columns:
+        LOGGER.warning("Cell type column '%s' not found; skipping marker heatmap.", celltype_col)
+        return
+
+    # 收集所有 marker 基因（去重，按 marker_genes 中顺序排列）
+    all_genes_ordered = []
+    gene_to_group = {}
+    for group, genes in marker_genes.items():
+        for g in genes:
+            if g not in gene_to_group:  # 防止重复
+                all_genes_ordered.append(g)
+                gene_to_group[g] = group
+
+    # 过滤不在数据集中的基因
+    available_genes = [g for g in all_genes_ordered if g in adata_sc.var_names]
+    if not available_genes:
+        LOGGER.warning("No marker genes found in adata_sc; skipping marker heatmap.")
+        return
+
+    # 提取表达矩阵（CP10K + log1p 归一化）
+    gene_idx = [list(adata_sc.var_names).index(g) for g in available_genes]
+    X = adata_sc.X
+    if sp_mod.issparse(X):
+        expr = np.asarray(X[:, gene_idx].todense())
+    else:
+        expr = np.array(X[:, gene_idx])
+
+    # CP10K + log1p 归一化
+    totals = expr.sum(axis=1, keepdims=True)
+    totals[totals == 0] = 1
+    expr = np.log1p(expr / totals * 1e4)
+
+    expr_df = pd.DataFrame(expr, index=adata_sc.obs_names, columns=available_genes)
+    expr_df["celltype"] = adata_sc.obs[celltype_col].values
+
+    # 按细胞类型分组计算均值
+    mean_expr = expr_df.groupby("celltype")[available_genes].mean()
+
+    # 对每个基因做 Z-score 标准化（跨细胞类型标准化，便于横向对比）
+    mean_z = mean_expr.apply(lambda col: scipy_zscore(col) if col.std() > 0 else col, axis=0)
+    mean_z = mean_z.fillna(0.0)
+
+    # 确定细胞类型列的顺序（按 marker_genes 键中出现的顺序排列）
+    ct_order = []
+    for group in marker_genes:
+        for ct in mean_z.index:
+            if group.lower().replace(" ", "") in ct.lower().replace(" ", "") and ct not in ct_order:
+                ct_order.append(ct)
+    # 追加未匹配的细胞类型
+    for ct in mean_z.index:
+        if ct not in ct_order:
+            ct_order.append(ct)
+    # 过滤不在 mean_z 中的类型
+    ct_order = [ct for ct in ct_order if ct in mean_z.index]
+
+    heatmap_data = mean_z.loc[ct_order, available_genes].T  # 基因为行，细胞类型为列
+
+    # 动态调整图片大小
+    n_genes = len(available_genes)
+    n_celltypes = len(ct_order)
+    fig_height = max(6, n_genes * 0.28 + 2)
+    fig_width  = max(8, n_celltypes * 0.9 + 3)
+
+    fig, ax = plt.subplots(figsize=(fig_width, fig_height))
+    im = ax.imshow(
+        heatmap_data.values,
+        aspect="auto",
+        cmap=_PAPER_YBP,
+        vmin=-2, vmax=2,
+    )
+
+    # 坐标轴刻度和标签
+    ax.set_xticks(range(n_celltypes))
+    ax.set_xticklabels(
+        [f"{ct}" for ct in ct_order],
+        rotation=45, ha="right", fontsize=8,
+    )
+    ax.set_yticks(range(n_genes))
+    ax.set_yticklabels(available_genes, fontsize=7, fontstyle="italic")
+
+    # 颜色条
+    cbar = fig.colorbar(im, ax=ax, fraction=0.02, pad=0.04)
+    cbar.set_label("Expression\n(Z-score)", fontsize=8)
+    cbar.ax.tick_params(labelsize=7)
+
+    ax.set_title(
+        "Cell Type Marker Gene Expression\n(Mean log-normalized, Z-score per gene)",
+        fontsize=10,
+    )
+
+    fig.tight_layout()
+    fig.savefig(save_path, dpi=dpi, bbox_inches="tight")
+    plt.close(fig)
+    LOGGER.info("细胞类型 Marker 热图已保存: %s", save_path)
 
 
 # ============================================================
@@ -347,7 +633,313 @@ def _compare_slices_generic(
 
 
 # ============================================================
-# 主流程
+# 联合分析主流程（模式 B：共享 RegressionModel 反卷积，合并 spot 结果）
+# ============================================================
+
+def main_joint(
+    path_scrna: Path,
+    path_sample_a: Path,
+    path_sample_b: Path,
+    sample_a_name: str,
+    sample_b_name: str,
+    output_dir: Path,
+) -> tuple:
+    """
+    联合分析主流程：HCC4R + CHC20（或任意两张 batch effect 极小的切片）。
+
+    设计要点
+    --------
+    1. 用 scRNA 参考与两张切片的三路共同基因子集训练一次 RegressionModel，
+       得到统一的 cell_state_df（不再各自独立训练）；
+    2. 用统一签名分别对两张切片做 Cell2location 反卷积，保证细胞类型比例
+       可直接比较（同一参考系下的估计值）；
+    3. 合并两切片的 spot 级 AnnData，写入 obs["sample"] 列标记来源；
+       保存为 adata_vis_post_joint.h5ad（供下游联合 niche 分析使用）；
+    4. 空间邻域关系由 run_spatial_niche_analysis.py 的 --per-sample-neighbors
+       参数保证"按切片内计算"，本函数不做邻域操作。
+
+    参数
+    ----
+    path_scrna     : scRNA 参考 h5ad 路径
+    path_sample_a  : 切片 A（如 HCC4R）Visium 目录
+    path_sample_b  : 切片 B（如 CHC20）Visium 目录
+    sample_a_name  : 切片 A 名称（文件命名用）
+    sample_b_name  : 切片 B 名称（文件命名用）
+    output_dir     : 结果输出根目录（如 results/joint_HCC4R_CHC20/）
+
+    返回
+    ----
+    (adata_vis_a_post, adata_vis_b_post, adata_vis_joint, shared_genes_joint)
+    """
+    import anndata as ad
+
+    global OUTPUT_DIR, LOGGER, LOG_PATH
+    OUTPUT_DIR = output_dir
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+
+    # 重新初始化日志
+    LOG_PATH = OUTPUT_DIR / "run_preprocessing.log"
+    for h in logging.root.handlers[:]:
+        logging.root.removeHandler(h)
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s | %(levelname)s | %(message)s",
+        handlers=[
+            logging.FileHandler(LOG_PATH, encoding="utf-8"),
+            logging.StreamHandler(sys.stdout),
+        ],
+    )
+    LOGGER = logging.getLogger(__name__)
+    LOGGER.info("=== run_preprocessing.py [联合分析模式] ===")
+    LOGGER.info("  样本 A : %s -> %s", sample_a_name, path_sample_a)
+    LOGGER.info("  样本 B : %s -> %s", sample_b_name, path_sample_b)
+    LOGGER.info("  输出目录: %s", OUTPUT_DIR)
+
+    t0 = perf_counter()
+    regression_model_cls, cell2location_cls = check_cell2location_available()
+
+    # ── Step 1: 加载 scRNA-seq 参考数据 ─────────────────────────────────────────
+    LOGGER.info("Step 1: Loading scRNA-seq reference data...")
+    adata_sc = load_scrna_h5ad(path_scrna, t0=t0)
+
+    # ── Step 2: 加载两张 Visium 空间数据 ────────────────────────────────────────
+    LOGGER.info("Step 2: Loading Visium spatial data for %s and %s...", sample_a_name, sample_b_name)
+    adata_vis_a = load_visium(path_sample_a, sample_name=sample_a_name)
+    adata_vis_b = load_visium(path_sample_b, sample_name=sample_b_name)
+
+    # ── Step 3: 三路共同基因对齐 ────────────────────────────────────────────────
+    # 要求 scRNA × 切片A × 切片B 的三路交集，保证两切片共用同一基因空间
+    LOGGER.info("Step 3: Computing three-way shared gene intersection...")
+    shared_a, adata_sc_a, adata_vis_a_sh = align_shared_genes(adata_sc, adata_vis_a)
+    shared_b, adata_sc_b, adata_vis_b_sh = align_shared_genes(adata_sc, adata_vis_b)
+
+    # 取三路交集
+    joint_genes = sorted(set(shared_a) & set(shared_b))
+    if len(joint_genes) == 0:
+        raise ValueError("No shared genes across scRNA, sample A, and sample B.")
+    LOGGER.info(
+        "Three-way shared genes: %d  (scRNA∩%s=%d, scRNA∩%s=%d)",
+        len(joint_genes), sample_a_name, len(shared_a), sample_b_name, len(shared_b),
+    )
+
+    # 过滤到三路共同基因
+    joint_gene_set = set(joint_genes)
+    adata_sc_joint = adata_sc[:, [g for g in adata_sc.var_names if g in joint_gene_set]].copy()
+    adata_vis_a_sh = adata_vis_a_sh[:, [g for g in adata_vis_a_sh.var_names if g in joint_gene_set]].copy()
+    adata_vis_b_sh = adata_vis_b_sh[:, [g for g in adata_vis_b_sh.var_names if g in joint_gene_set]].copy()
+
+    # ── Step 4: Treg 亚群鉴定与标注 ─────────────────────────────────────────────
+    LOGGER.info("Step 4: Identifying Treg subcluster...")
+    adata_t = subset_t_cells(adata_sc_joint)
+    treg_markers = ["CD3D", "CD4", "FOXP3", "IL2RA"]
+    available_treg_markers = [g for g in treg_markers if g in adata_t.var_names]
+    missing_treg_markers = sorted(set(treg_markers) - set(available_treg_markers))
+    if missing_treg_markers:
+        LOGGER.warning("Missing Treg marker genes: %s", ", ".join(missing_treg_markers))
+
+    if available_treg_markers:
+        try:
+            treg_dotplot_path = output_dir / "t_cell_dotplot_horizontal.png"
+            plot_treg_dotplot_horizontal(
+                adata_t,
+                marker_genes=available_treg_markers,
+                groupby="res.3",
+                save_path=treg_dotplot_path,
+            )
+        except Exception as exc:
+            LOGGER.warning("Treg dotplot failed (%s); falling back to vertical version.", exc)
+            sc.pl.dotplot(adata_t, available_treg_markers, groupby="res.3", show=False)
+            plt.savefig(output_dir / "t_cell_dotplot.png", dpi=150, bbox_inches="tight")
+            plt.close()
+
+    adata_sc_joint = assign_treg_label(adata_sc_joint, treg_clusters=("9", "9.0"))
+    LOGGER.info(
+        "Joint reference cell type counts:\n%s",
+        adata_sc_joint.obs["final_celltype"].value_counts().to_string(),
+    )
+
+    # ── Step 4+: 绘制 scRNA-seq 细胞类型图（仿论文 Figure C/D 风格）─────────────
+    LOGGER.info("Step 4+: Generating scRNA-seq cell type visualization plots (paper style)...")
+
+    # 图1：tSNE/UMAP 细胞类型分布图（仿论文 Figure C 风格：docs/plots/1.png）
+    _celltype_col = (
+        "final_celltype" if "final_celltype" in adata_sc_joint.obs.columns
+        else (adata_sc_joint.obs.columns[0] if len(adata_sc_joint.obs.columns) > 0 else "celltype")
+    )
+    try:
+        plot_scrna_tsne_celltype(
+            adata_sc_joint,
+            celltype_col=_celltype_col,
+            cluster_col="res.3" if "res.3" in adata_sc_joint.obs.columns else None,
+            save_path=output_dir / "scrna_tsne_celltype.png",
+        )
+    except Exception as exc:
+        LOGGER.warning("tSNE cell type plot failed: %s", exc)
+
+    # 图2：细胞类型 Marker 基因热图（仿论文 Figure D 风格：docs/plots/2.png）
+    _CELLTYPE_MARKERS = {
+        "T cell":       ["IL7R", "CD3G", "CD2", "ITM2A", "CD3D"],
+        "Myeloid":      ["LYZ", "AIF1", "RNASE1", "C1QB", "HLA-DRA"],
+        "NK":           ["GNLY", "GZMB", "KLRD1", "KLRF1"],
+        "B cell":       ["B3GNT7", "MS4A1", "BANK1", "CD79A", "TNFRSF13C", "BCL11A"],
+        "Malignant":    ["APOA2", "ALB", "APOA1", "AMBP", "APOH", "TTR"],
+        "Endothelial":  ["PECAM1", "CDH5", "SPARCL1", "STC1", "SPARC", "TM4SF1"],
+        "Epithelial":   ["INSR", "KRT18", "KRT19", "DEFB1", "CTSK", "EPCAM", "SOX4"],
+        "Plasma cell":  ["JCHAIN", "TCF4", "TCL1A", "IGLL1", "MZB1", "IGLL5", "SSR4"],
+        "HSC":          ["RGS5", "COL1A1", "ACTA2", "PDGFRB"],
+    }
+    try:
+        plot_celltype_marker_heatmap(
+            adata_sc_joint,
+            celltype_col=_celltype_col,
+            marker_genes=_CELLTYPE_MARKERS,
+            save_path=output_dir / "scrna_celltype_marker_heatmap.png",
+        )
+    except Exception as exc:
+        LOGGER.warning("Marker heatmap failed: %s", exc)
+
+    # ── Step 5: 统一 RegressionModel 训练（一次训练，两切片共享）────────────────
+    LOGGER.info("Step 5: Training shared RegressionModel (joint reference)...")
+    model_joint = setup_and_train_regression_model(adata_sc_joint, regression_model_cls)
+
+    model_joint.plot_history(50)
+    hist_path = output_dir / "regression_training_history_joint.png"
+    plt.savefig(hist_path, dpi=150, bbox_inches="tight")
+    plt.close()
+    LOGGER.info("统一参考模型训练曲线已保存: %s", hist_path)
+
+    adata_sc_joint = export_signatures(model_joint, adata_sc_joint)
+    cell_state_df_joint = sanitize_cell_state_df(extract_cell_state_df(adata_sc_joint))
+    LOGGER.info("Shared cell_state_df: %d genes × %d cell types", *cell_state_df_joint.shape)
+
+    # ── Step 6: 用统一签名分别对两张切片做 Cell2location 反卷积 ─────────────────
+    LOGGER.info("Step 6: Running Cell2location deconvolution for %s (joint ref)...", sample_a_name)
+    prop_a, adata_vis_a_post = _run_cell2location_for_slice(
+        adata_vis_raw=adata_vis_a_sh,
+        cell_state_df=cell_state_df_joint,
+        cell2location_cls=cell2location_cls,
+        sample_name=sample_a_name,
+        output_dir=output_dir,
+    )
+
+    LOGGER.info("Step 6: Running Cell2location deconvolution for %s (joint ref)...", sample_b_name)
+    prop_b, adata_vis_b_post = _run_cell2location_for_slice(
+        adata_vis_raw=adata_vis_b_sh,
+        cell_state_df=cell_state_df_joint,
+        cell2location_cls=cell2location_cls,
+        sample_name=sample_b_name,
+        output_dir=output_dir,
+    )
+
+    # ── Step 7: 合并两张切片的 spot 级结果（添加 sample 来源标记）────────────────
+    LOGGER.info("Step 7: Merging spot-level results from %s and %s...", sample_a_name, sample_b_name)
+
+    # 在 obs 中写入切片来源标记（供下游空间邻域分析按切片内计算）
+    adata_vis_a_post.obs["sample"] = sample_a_name
+    adata_vis_b_post.obs["sample"] = sample_b_name
+
+    # 确保两切片使用同一基因集（应一致，保险起见取交集再对齐）
+    common_vars = adata_vis_a_post.var_names.intersection(adata_vis_b_post.var_names)
+    if len(common_vars) < len(adata_vis_a_post.var_names):
+        LOGGER.warning(
+            "After deconvolution, %d genes dropped from var intersection (%d → %d).",
+            len(adata_vis_a_post.var_names) - len(common_vars),
+            len(adata_vis_a_post.var_names),
+            len(common_vars),
+        )
+    adata_a_aligned = adata_vis_a_post[:, common_vars].copy()
+    adata_b_aligned = adata_vis_b_post[:, common_vars].copy()
+
+    # obs_names 加前缀防止合并后重复
+    import re as _re
+    adata_a_aligned.obs_names = [f"{sample_a_name}_{n}" for n in adata_a_aligned.obs_names]
+    adata_b_aligned.obs_names = [f"{sample_b_name}_{n}" for n in adata_b_aligned.obs_names]
+
+    # 合并 obsm（means_cell_abundance_w_sf）
+    def _concat_obsm_key(a, b, key):
+        """
+        将两个 AnnData 的同一 obsm 键拼接为一个 DataFrame/ndarray，
+        行索引对应各自的 obs_names。
+        """
+        import numpy as _np
+        val_a = a.obsm.get(key)
+        val_b = b.obsm.get(key)
+        if val_a is None or val_b is None:
+            return None
+        if isinstance(val_a, pd.DataFrame):
+            return pd.concat([val_a, val_b], axis=0)
+        return _np.concatenate([val_a, val_b], axis=0)
+
+    adata_vis_joint = ad.concat(
+        [adata_a_aligned, adata_b_aligned],
+        axis=0,
+        merge="same",
+        uns_merge="same",
+    )
+    # concat 默认不拷贝 obsm，手动合并
+    for key in ["means_cell_abundance_w_sf", "cell_abundance", "spatial"]:
+        merged = _concat_obsm_key(adata_a_aligned, adata_b_aligned, key)
+        if merged is not None:
+            adata_vis_joint.obsm[key] = merged
+
+    LOGGER.info(
+        "Joint AnnData: %d spots (%s: %d, %s: %d), %d genes",
+        adata_vis_joint.n_obs,
+        sample_a_name, adata_a_aligned.n_obs,
+        sample_b_name, adata_b_aligned.n_obs,
+        adata_vis_joint.n_vars,
+    )
+
+    # 保存联合 h5ad
+    joint_h5ad_path = output_dir / "adata_vis_post_joint.h5ad"
+    adata_vis_joint.write_h5ad(joint_h5ad_path)
+    LOGGER.info("联合 AnnData 已保存: %s", joint_h5ad_path)
+
+    # 同时保存标准名称副本（供下游 run_spatial_niche_analysis.py 默认读取）
+    std_path = output_dir / "adata_vis_post.h5ad"
+    adata_vis_joint.write_h5ad(std_path)
+    LOGGER.info("标准名称副本已保存: %s", std_path)
+
+    # 合并比例表（含 sample 列）
+    prop_a["sample"] = sample_a_name
+    prop_b["sample"] = sample_b_name
+    prop_joint = pd.concat([prop_a, prop_b], ignore_index=True)
+    prop_joint.to_csv(output_dir / "spot_cell_proportion_joint.csv", index=False)
+    LOGGER.info("联合细胞比例表已保存。")
+
+    # ── Step 8: 生成联合细胞组成对比图 ──────────────────────────────────────────
+    LOGGER.info("Step 8: Generating cross-slice comparison plots...")
+    comparison_dir = output_dir / "cross_slice_comparison"
+    comparison_dir.mkdir(parents=True, exist_ok=True)
+    cell_types_to_compare = ["Hepatocyte", "Treg", "T/NK", "Myeloid", "Fibroblast", "B cell"]
+    _compare_slices_generic(
+        prop_a, prop_b, sample_a_name, sample_b_name,
+        cell_types_to_compare, comparison_dir,
+    )
+
+    # ── Step 9: 保存共享基因列表和 scRNA AnnData ─────────────────────────────────
+    adata_sc_joint.write_h5ad(output_dir / "adata_sc_post.h5ad")
+    adata_sc_joint.write_h5ad(output_dir / f"adata_sc_post_joint.h5ad")
+    (output_dir / "shared_genes_joint.txt").write_text(
+        "\n".join(joint_genes), encoding="utf-8"
+    )
+
+    LOGGER.info("全部步骤完成。结果保存至: %s", output_dir)
+    LOGGER.info("Run completed in %.2fs", perf_counter() - t0)
+    LOGGER.info(
+        "后续步骤：\n"
+        "  Step 2 (联合空间生态位分析): "
+        "python code/pipeline/run_spatial_niche_analysis.py "
+        "--adata %s/adata_vis_post_joint.h5ad "
+        "--out-dir %s/spatial_niche "
+        "--per-sample-neighbors",
+        output_dir, output_dir,
+    )
+    return adata_vis_a_post, adata_vis_b_post, adata_vis_joint, joint_genes
+
+
+# ============================================================
+# 主流程（模式 A：单切片 / 历史兼容）
 # ============================================================
 
 def main(
@@ -470,6 +1062,45 @@ def main(
             sample2_name,
             adata_sc_s2.obs["final_celltype"].value_counts().to_string(),
         )
+
+    # ── Step 4+: 绘制 scRNA-seq 细胞类型图（仿论文 Figure C/D 风格）─────────────
+    LOGGER.info("Step 4+: Generating scRNA-seq cell type visualization plots (paper style)...")
+    _celltype_col_s1 = (
+        "final_celltype" if "final_celltype" in adata_sc_s1.obs.columns
+        else (adata_sc_s1.obs.columns[0] if len(adata_sc_s1.obs.columns) > 0 else "celltype")
+    )
+    # 图1：tSNE/UMAP 细胞类型分布图（仿论文 Figure C 风格：docs/plots/1.png）
+    try:
+        plot_scrna_tsne_celltype(
+            adata_sc_s1,
+            celltype_col=_celltype_col_s1,
+            cluster_col="res.3" if "res.3" in adata_sc_s1.obs.columns else None,
+            save_path=output_dir / "scrna_tsne_celltype.png",
+        )
+    except Exception as exc:
+        LOGGER.warning("tSNE cell type plot failed: %s", exc)
+
+    # 图2：细胞类型 Marker 基因热图（仿论文 Figure D 风格：docs/plots/2.png）
+    _CELLTYPE_MARKERS = {
+        "T cell":       ["IL7R", "CD3G", "CD2", "ITM2A", "CD3D"],
+        "Myeloid":      ["LYZ", "AIF1", "RNASE1", "C1QB", "HLA-DRA"],
+        "NK":           ["GNLY", "GZMB", "KLRD1", "KLRF1"],
+        "B cell":       ["B3GNT7", "MS4A1", "BANK1", "CD79A", "TNFRSF13C", "BCL11A"],
+        "Malignant":    ["APOA2", "ALB", "APOA1", "AMBP", "APOH", "TTR"],
+        "Endothelial":  ["PECAM1", "CDH5", "SPARCL1", "STC1", "SPARC", "TM4SF1"],
+        "Epithelial":   ["INSR", "KRT18", "KRT19", "DEFB1", "CTSK", "EPCAM", "SOX4"],
+        "Plasma cell":  ["JCHAIN", "TCF4", "TCL1A", "IGLL1", "MZB1", "IGLL5", "SSR4"],
+        "HSC":          ["RGS5", "COL1A1", "ACTA2", "PDGFRB"],
+    }
+    try:
+        plot_celltype_marker_heatmap(
+            adata_sc_s1,
+            celltype_col=_celltype_col_s1,
+            marker_genes=_CELLTYPE_MARKERS,
+            save_path=output_dir / "scrna_celltype_marker_heatmap.png",
+        )
+    except Exception as exc:
+        LOGGER.warning("Marker heatmap failed: %s", exc)
 
     # ── Step 5: 训练主分析切片的 RegressionModel ──────────────────────────────────
     LOGGER.info("Step 5: Training RegressionModel for %s...", sample1_name)
