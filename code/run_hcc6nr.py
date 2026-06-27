@@ -1,26 +1,26 @@
 """
 ================================================================================
-HCC6NR 数据集入口脚本
+HCC1R 数据集入口脚本
 ================================================================================
 
-功能：对 HCC6NR Visium 切片执行完整的预处理 + Cell2location 反卷积流程，
-      并自动调用空间生态位分析（Step 2），结果保存到 results/HCC6NR/。
+功能：对 HCC1R Visium 切片执行完整的预处理 + Cell2location 反卷积流程，
+      并自动调用空间生态位分析（Step 2），结果保存到 results/HCC1R/。
 
 用法：
-    python code/run_hcc6nr.py
+    python code/run_hcc1r.py
 
     可选：仅运行预处理（Step 1）
-    python code/run_hcc6nr.py --step1-only
+    python code/run_hcc1r.py --step1-only
 
     可选：仅运行空间分析（已有 adata_vis_post.h5ad 时跳过 Step 1）
-    python code/run_hcc6nr.py --step2-only
+    python code/run_hcc1r.py --step2-only
 
 输出目录：
-    results/HCC6NR/                  ← Cell2location 反卷积结果
-    results/HCC6NR/spatial_niche/    ← 空间生态位分析结果
+    results/HCC1R/                  ← Cell2location 反卷积结果
+    results/HCC1R/spatial_niche/    ← 空间生态位分析结果
 
 数据目录（Space Ranger 输出格式，与 CHC20/CHC23 结构相同）：
-    data/HCC6NR/                     ← HCC6NR Visium 数据目录
+    data/HCC1R/                     ← HCC1R Visium 数据目录
 ================================================================================
 """
 from __future__ import annotations
@@ -33,16 +33,16 @@ from pathlib import Path
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 
 # ── 数据集专属配置 ────────────────────────────────────────────────────────────
-SAMPLE1_NAME   = "HCC6NR"
+SAMPLE1_NAME   = "HCC1R"
 SAMPLE2_NAME   = "HCC4R"          # 可与 HCC4R 互相作为配对验证（可不传）
 PATH_SCRNA     = _REPO_ROOT / "data" / "scRNA_reference.h5ad"
-PATH_SAMPLE1   = _REPO_ROOT / "data" / "HCC6NR"
+PATH_SAMPLE1   = _REPO_ROOT / "data" / "HCC1R"
 PATH_SAMPLE2   = _REPO_ROOT / "data" / "HCC4R"    # 若不需要配对验证，设为 None
 OUTPUT_DIR     = _REPO_ROOT / "results" / SAMPLE1_NAME
 
 
 def parse_args():
-    p = argparse.ArgumentParser(description="HCC6NR 完整分析流程（Step 1 + Step 2）")
+    p = argparse.ArgumentParser(description="HCC1R 完整分析流程（Step 1 + Step 2）")
     p.add_argument("--step1-only",   action="store_true", help="仅运行 Step 1（预处理 + 反卷积）")
     p.add_argument("--step2-only",   action="store_true", help="仅运行 Step 2（空间生态位分析）")
     p.add_argument("--no-sample2",   action="store_true", help="Step 1 中跳过 HCC4R 配对验证切片")
@@ -75,7 +75,7 @@ def run_step2():
 
     if not adata_path.exists():
         print(f"[ERROR] adata_vis_post.h5ad not found at {adata_path}")
-        print("       Please run Step 1 first: python code/run_hcc6nr.py --step1-only")
+        print("       Please run Step 1 first: python code/run_hcc1r.py --step1-only")
         sys.exit(1)
 
     cmd = [
@@ -84,7 +84,7 @@ def run_step2():
         "--out-dir",       str(out_dir),
         "--signature-out", str(sig_out),
     ]
-    print(f"[run_hcc6nr] Running Step 2: {' '.join(cmd)}")
+    print(f"[run_hcc1r] Running Step 2: {' '.join(cmd)}")
     result = subprocess.run(cmd, check=False)
     if result.returncode != 0:
         print(f"[ERROR] Step 2 failed with exit code {result.returncode}")

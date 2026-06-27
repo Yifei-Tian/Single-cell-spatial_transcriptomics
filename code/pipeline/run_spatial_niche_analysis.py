@@ -1923,7 +1923,7 @@ def _plot_niche_comparison(
 
 
 # ============================================================
-# 新增：参数扫描（resolution × niche_high_quantile 网格搜索）
+# 新增：参数扫描（k × niche_high_quantile 网格搜索）
 # ============================================================
 
 def _param_scan_deg_stability(
@@ -1996,6 +1996,9 @@ def _param_scan_deg_stability(
     import itertools
 
     gs = gene_score.reindex(proportions.index).fillna(0.0)
+    expr = _expression_frame(adata)
+    expr_columns = expr.columns.tolist()
+    gene_to_idx = {gene: idx for idx, gene in enumerate(expr_columns)}
     rows = []
 
     for k, quantile in itertools.product(k_list, quantile_list):
@@ -2023,7 +2026,6 @@ def _param_scan_deg_stability(
                 continue
 
             # 4. Wilcoxon 检验（快速版：仅对 log2FC > 0.3 的基因检验）
-            expr = _expression_frame(adata)
             # niche_score 的索引来自 proportions，expr 的索引来自 adata.obs_names，
             # 两者可能不完全一致，必须对齐后再用布尔索引，否则触发
             # "Unalignable boolean Series" 错误。
@@ -2037,7 +2039,7 @@ def _param_scan_deg_stability(
             cands = expr.columns[lfc.to_numpy() > 0.3].tolist()
             pvals = np.ones(len(expr.columns))
             for gene in cands:
-                gidx = list(expr.columns).index(gene)
+                gidx = gene_to_idx[gene]
                 try:
                     _, p = scipy_stats.mannwhitneyu(
                         high_expr[gene].to_numpy(), low_expr[gene].to_numpy(),
@@ -2052,7 +2054,7 @@ def _param_scan_deg_stability(
 
             # Top-N 基因（按 log2FC 降序）
             sig_df = pd.DataFrame({
-                "gene":    expr.columns.tolist(),
+                "gene":    expr_columns,
                 "log2_fc": lfc.to_numpy(),
                 "fdr":     fdr,
             })
@@ -2065,8 +2067,7 @@ def _param_scan_deg_stability(
             if not top_genes:
                 top_genes = sig_df.sort_values("log2_fc", ascending=False).head(top_n)["gene"].tolist()
 
-            mean_lfc_top = float(lfc[sig_df["gene"].isin(top_genes)].mean()) \
-                if top_genes else 0.0
+            mean_lfc_top = float(lfc.reindex(top_genes).dropna().mean()) if top_genes else 0.0
 
             rows.append({
                 "k":               k,
@@ -2520,7 +2521,7 @@ def main() -> int:
         logging.warning("Volcano/fraction plot failed: %s", exc)
 
     # ── Step 15: 参数扫描（resolution × niche_high_quantile 网格搜索）────────────
-    logging.info("Step 15: Running parameter scan (resolution × quantile grid)...")
+    logging.info("Step 15: Running parameter scan (k × quantile grid)...")
     try:
         param_scan_df = _param_scan_deg_stability(
             adata=adata,

@@ -34,10 +34,10 @@ _REPO_ROOT = Path(__file__).resolve().parent.parent
 
 # ── 数据集专属配置 ────────────────────────────────────────────────────────────
 SAMPLE1_NAME   = "HCC4R"
-SAMPLE2_NAME   = "HCC6NR"         # 配对验证切片（可不传，设为 None 可跳过）
+SAMPLE2_NAME   = "HCC1R"         # 配对验证切片（可不传，设为 None 可跳过）
 PATH_SCRNA     = _REPO_ROOT / "data" / "scRNA_reference.h5ad"
 PATH_SAMPLE1   = _REPO_ROOT / "data" / "HCC4R"
-PATH_SAMPLE2   = _REPO_ROOT / "data" / "HCC6NR"   # 若不需要配对验证，设为 None
+PATH_SAMPLE2   = _REPO_ROOT / "data" / "HCC1R"   # 若不需要配对验证，设为 None
 OUTPUT_DIR     = _REPO_ROOT / "results" / SAMPLE1_NAME
 
 
@@ -45,7 +45,7 @@ def parse_args():
     p = argparse.ArgumentParser(description="HCC4R 完整分析流程（Step 1 + Step 2）")
     p.add_argument("--step1-only",   action="store_true", help="仅运行 Step 1（预处理 + 反卷积）")
     p.add_argument("--step2-only",   action="store_true", help="仅运行 Step 2（空间生态位分析）")
-    p.add_argument("--no-sample2",   action="store_true", help="Step 1 中跳过 HCC6NR 配对验证切片")
+    p.add_argument("--no-sample2",   action="store_true", help="Step 1 中跳过 HCC1R 配对验证切片")
     return p.parse_args()
 
 
