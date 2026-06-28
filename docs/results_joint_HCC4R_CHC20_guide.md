@@ -179,7 +179,7 @@
 
 ### 1.3 scRNA-seq 可视化图
 
-#### `scrna_tsne_celltype.png`
+#### `scrna_tsne_celltype.png` ==（没做）==
 
 **来源脚本 / Step**：`run_preprocessing.py` → `main_joint()` → **Step 4+**（调用 `plot_scrna_tsne_celltype()`）
 

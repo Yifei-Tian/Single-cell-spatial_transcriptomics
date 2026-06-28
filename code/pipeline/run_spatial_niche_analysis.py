@@ -2731,7 +2731,7 @@ def main() -> int:
             fibroblast_col=args.fibroblast_col,
             n_neighbors=args.n_neighbors,
             k_list=(8, 10, 15, 20, 25),
-            quantile_list=(0.70, 0.75, 0.80, 0.85),
+            quantile_list=(0.80, 0.85, 0.9, 0.95), # TODO：尝试不同取值
             sample_labels=sample_labels if per_sample else None,
             top_n=args.top_niche_genes,
             seed=args.seed,
