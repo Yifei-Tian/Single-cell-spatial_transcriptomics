@@ -213,25 +213,25 @@ ELBO 是变分推断（Variational Inference）中的优化目标，其绝对值
 
 ---
 
-### 1.9 `cross_slice_comparison/` 目录（可选，多切片一致性验证图）
+### 1.9 `cross_slice_comparison/` 目录（可选，HCC4R 与 CHC20 细胞组成对比图）
 
-当 Step 1 同时传入 HCC1R 配对验证切片（`--no-sample2` 参数未启用时）生成。
+当 Step 1 同时处理 CHC20 验证切片时生成（两者均使用同一 RegressionModel 独立预测，结果分别保存于 `results/HCC4R/` 和 `results/CHC20/`，此目录仅用于可视化对比，**不涉及合并联合分析**）。
 
 #### `cross_slice_mean_proportion_comparison.png`
 
-**内容**：HCC4R 与 HCC1R 各细胞类型**全切片平均比例**的并排条形图。
+**内容**：HCC4R（主分析）与 CHC20（验证队列）各细胞类型**全切片平均比例**的并排条形图。
 
-**如何理解**：若两个切片的细胞类型组成比例趋势相近（如 Hepatocyte 均为最高占比，Treg 均偏低但存在），则说明两个配对样本的整体微环境构成具有代表性，支持一致性假设。
+**如何理解**：若两个切片的细胞类型组成比例趋势相近（如 Hepatocyte 均为最高占比，Treg 均偏低但存在），则说明两个独立患者样本的整体微环境构成具有代表性，支持跨队列验证的前提假设。
 
 #### `cross_slice_treg_distribution.png`
 
-**内容**：HCC4R 与 HCC1R Treg 比例分布的核密度估计（KDE）对比曲线。
+**内容**：HCC4R 与 CHC20 Treg 比例分布的核密度估计（KDE）对比曲线。
 
 **揭示的生物学现象**：Treg 在肝癌组织中的浸润通常是稀疏但局灶性富集的（分布呈右尾），这种"局灶性免疫抑制"模式的跨样本一致性是免疫逃逸机制普遍存在的空间证据。
 
 #### `cross_slice_celltype_boxplot.png`
 
-**内容**：Treg、Myeloid、Fibroblast、Hepatocyte 四种关键细胞类型在两切片中比例分布的箱线图对比。
+**内容**：Treg、Myeloid、Fibroblast、Hepatocyte 四种关键细胞类型在 HCC4R 与 CHC20 两切片中比例分布的箱线图对比（两切片独立反卷积，仅做并排可视化，不合并数据）。
 
 ---
 
@@ -309,7 +309,7 @@ ELBO 是变分推断（Variational Inference）中的优化目标，其绝对值
 | `n_niche_high` | 被标记为 niche_high 的 spot 总数 |
 | `niche_high_quantile` | niche_high 分位数设置（**当前值：0.85**） |
 | `marker_genes_used` | 实际用于计算免疫抑制基因评分的基因列表 |
-| `per_sample_neighbors` | 是否启用按切片内建立空间邻域（联合分析时为 True，单切片分析时为 False） |
+| `per_sample_neighbors` | 是否启用切片内限制 kNN 邻域（**当前单切片分析中恒为 False**；仅在将多切片合并为单一 h5ad 后联合聚类时才需置为 True，防止跨切片建立物理邻居） |
 
 **如何理解**：
 
