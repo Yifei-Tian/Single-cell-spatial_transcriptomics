@@ -1,112 +1,54 @@
 # 需求文档
 
-我计划用HCC4R数据作为主分析的空间转录组数据，CHC20作为验证分析的空间转录组数据，并做出一些能够插入论文中的图表。
+### 第一个文件（上游解卷积）：保持“统一训练，分开预测”
 
-要求：这里面的所有子图都要单独生成，不要多个子图拼接。
+你目前的 Step 5 和 Step 6 设计得非常优雅：**“训练一个统一的 RegressionModel，分别对两张切片做 Cell2location”**。这个完全不需要改！因为用同一个单细胞基准去解卷积两张切片，才能保证两者的细胞比例在同一尺度下，这是后续验证的基础。
 
-目前我的代码已经有这些图表的一部分，将尚未生成的图表生成。
+- **需要修改的地方：**
+  - **取消 Step 7（合并两切片结果）：** 绝对不要在这里把它们合并（Concat）。保持 `HCC4R` 和 `CHC20` 为两个独立的 AnnData 对象（例如 `adata_A` 和 `adata_B`），分别保存。
+  - **修改 Step 8（一致性对比）：** 此时不是对比“一致性”，而是分别观察两张切片各自的细胞分布是否符合各自的解剖结构。
 
-## Figure 1: 课题总体设计与单细胞参考数据集的细胞图谱 (Baseline)
+### 第二个文件（下游空间分析）：彻底转为“A 建立规律 $\rightarrow$ B 验证”
 
-> **目的：** 阐明研究设计；利用 scRNA-seq 数据建立高质量的细胞类型参考，重点勾勒出免疫抑制细胞（如 Treg）的转录特征。
+假设你选定 **`HCC4R` 作为主分析切片（A）**，**`CHC20` 作为验证切片（B）**。
 
-- ### **1A. 课题技术路线图 (Workflow Diagram)**
+#### 1. 主分析切片 `HCC4R` 的运行逻辑（Step 1 ~ Step 10）
 
-  - **内容：** 流程示意图。左边是 scRNA-seq（细胞分群与 Marker 鉴定），中间是 2 例空间转录组切片（HCC4R 作为发现集，CHC20 作为独立验证集，进行解卷积与空间生态位分析），右边是外部临床大队列（TCGA/ICGC 肝癌数据，进行生态位特征的生存预后验证）。
+- **Step 6 (空间聚类):** 仅在 `HCC4R` 上构建 kNN 图并运行 Leiden 聚类，划分出不同的空间生态位（Spatial Niche / Domain）。
+- **Step 7 & 10 (语义注释与区域标注):** 根据功能评分，在 `HCC4R` 上明确定义出哪些 Spot 是 `tumor_core`、`tumor_edge`、`stroma_immune`。
+- **Step 14 (特征基因提取):** 提取出 `HCC4R` 里面定义出的这些空间区域（特别是你关注的免疫抑制微环境 `tumor_edge`）的特异性特征基因（Spatial Domain Markers）。
 
-- ### **1B. scRNA-seq 细胞分群 tSNE / UMAP 图 (`scrna_tsne_celltype.png`)**
+#### 2. 验证切片 `CHC20` 的运行逻辑（**关键改变**）
 
-  - **内容：** 展示单细胞数据集中所有细胞的低维嵌入投影，按主要细胞类型（T/NK, Myeloid, B cell, Malignant, Endothelial, HSC 等）着色，中心有白色背景的类型标签。
+对于验证集 `CHC20`，你**不能**重新运行 Step 6 的自由 Leiden 聚类和 Step 10 的人工标注，而是要用 A 的规则去“套”它。
 
-- ### **1C. 细胞类型特异性 Marker 基因热图 (`scrna_celltype_marker_heatmap.png`)**
+## ➕ 需要新添加的 3 个核心过程
 
-  - **内容：** Yellow-Black-Purple 配色。X 轴为细胞类型，Y 轴为特异性 Marker（如 Malignant 的 `ALB`/`APOA2`，HSC 的 `ACTA2`，T 细胞的 `CD3D` 等），展示清晰的对角线高亮模式，证明单细胞注释的绝对可靠。
+为了实现硬核的验证，你需要在第二个文件中添加以下三个模块：
 
-- ### **1D. T/NK 细胞亚群细分及 Treg 鉴定气泡图 (DotPlot)**
+### 新过程 1：空间区域分类器迁移（Domain Label Transfer）
 
-  - **内容：** 聚焦 T 细胞内部，展示 `FOXP3`、`CTLA4`、`TIGIT`、`IKZF2` 等免疫抑制标志物在 Treg 亚群中的特异性高表达（气泡大小代表表达比例，颜色深浅代表表达量），为后续空间解卷积提供精准的“Treg 签名”。
+不能让验证集自己聚类，而是要用主分析切片训练一个分类器，去预测验证集的区域。
 
-## 🗺️ Figure 2: 空间转录组特征解卷积与多细胞成分的联合映射
+- **做法：** 1. 在主分析切片（`HCC4R`）上，以 Step 6/10 得到的区域标签（`tumor_core`, `tumor_edge` 等）为 Y，以 Spot 的细胞比例/基因表达为 X，训练一个简单的机器学习模型（如**随机森林 Random Forest**，或使用 Seurat/Scanpy 自带的标签迁移算法）。
 
-> **目的：** 将单细胞定义的细胞类型概率准确投射到空间切片上，观察各类细胞在肝癌组织中的空间分布初貌。
+  \2. 将该模型直接应用到验证切片（`CHC20`）上，预测出 `CHC20` 每一个 Spot 属于哪个区域。
 
-- ### **2A. 空间切片 H&E 染色病理图与解剖标注**
+  \3. **映射回空间：** 画出 `CHC20` 的空间预测图，看预测出来的 `tumor_edge` 是不是在 H&E 染色的肿瘤边缘。
 
-  - **内容：** 发现集切片（HCC4R）的原始 H&E 图像，旁边附带病理医生或基于形态学标注的肿瘤核心、癌旁、边界等区域。
+### 新过程 2：特征基因表达与微环境评分的一致性检验（Score Validation）
 
-- ### **2B. 核心细胞类型空间丰度图 (Spatial Scatterpie / FeaturePlot)**
+验证你在主分析中算出的各种高阶评分（如 `immunosuppressive_niche_score`）和特征基因是否在验证集中依然成立。
 
-  - **内容：** 在切片二维空间坐标上，用颜色深浅展示恶性肝癌细胞（Malignant）、HSC、Treg、Myeloid 细胞的预测占比（Proportion）。
+- **做法：**
+  1. 提取主分析（`HCC4R`）中 Step 14 筛选出的特征基因。
+  2. 在验证集（`CHC20`）被预测出的对应区域里，计算这些基因的平均表达量（可以画一个类似你提到的 `marker_heatmap`）。
+  3. **统计学检验：** 检查主分析中表现为 `tumor_edge` 高表达的评分（如 `Treg_like_score`），在验证集的 `tumor_edge` 区域是否也显著高于 `tumor_core`（用 Wilcoxon 秩和检验算 $p$ 值）。
 
-- ### **2C. 细胞空间共定位相关性热图 (Spatial Co-localization Heatmap)**
+### 新过程 3：空间共定位与邻域模式验证（Neighborhood Pattern Match）
 
-  - **内容：** 计算切片上任意两种细胞丰度在所有 Spot 间的 Pearson 相关系数。
-  - **揭示现象：** 揭示哪些细胞倾向于“成双成对”地出现在同一个微环境中（例如：Treg 与 HSC、Malignant 呈现强正相关，暗示免疫抑制轴的物理临近）。
+验证“细胞与细胞之间的空间临近关系”在两张切片中是否高度一致。
 
-## 🏔️ Figure 3: 主分析切片（HCC4R）的空间生态位（Spatial Niche）聚类与功能定量
-
-> **目的：** 引入空间结构信息（Step 6 Leiden 聚类），将 Spot 划分为不同的“空间生态位”（Spatial Domain），并计算高阶微环境评分，锁定“免疫抑制前线”。
-
-- ### **3A. 基于空间邻域图的空间生态位聚类图 (Spatial Domain / Niche Map)**
-
-  - **内容：** 展示 `HCC4R` 经过 kNN 空间邻接与 Leiden 聚类后的结果。切片被涂成 4-5 种颜色，对应不同的解剖功能区（如 Domain 1: Tumor Core, Domain 2: Tumor Edge, Domain 3: Stroma/Immune Hub）。
-
-- ### **3B. 空间生态位细胞组成条形图 (Composition BarPlot)**
-
-  - **内容：** X 轴为各个 Spatial Domain，Y 轴为 100% 堆叠条形图，展示每个生态位内部的细胞成分比例。
-  - **揭示现象：** 明确展示 `Tumor Edge`（肿瘤边缘区）中同时富集了 Malignant、HSC 和 Treg 细胞，构成了一个“多细胞混战”的独特空间结构。
-
-- ### **3C. 多层次微环境评分空间投影与小提琴图组合图 (Violin + Spatial Plot)**
-
-  - **内容：** 展示 `Treg_like_score`、`immune_stroma_score` 以及核心的 **`immunosuppressive_niche_score`（免疫抑制生态位评分）** 在切片上的连续分布，以及在不同 Domain 间对比的小提琴图。
-  - **揭示现象：** 定量证实免疫抑制评分在 `Tumor Edge` 达到峰值。
-
-## 🧪 Figure 4: 免疫抑制生态位特征基因提取与机制挖掘
-
-> **目的：** 通过你代码中的“三层筛选策略”（Step 14），找出到底是谁在驱动这个免疫抑制生态位，挖掘其背后的生物学机制。
-
-- ### **4A. 空间差异基因火山图 / 气泡图 (Volcano Plot / DotPlot)**
-
-  - **内容：** 对比 `Tumor Edge` 与其他生态位，展示显著上调的空间差异表达基因（SDEGs），高亮突显基质重塑（如 `COL1A1`）与免疫检查点相关基因。
-
-- ### **4B. 空间生态位特异性特征基因热图 (Niche Marker Heatmap)**
-
-  - **内容：** 展示筛选出的特征基因（Signature Genes）在不同空间 Domain 中的表达情况，确立代表该免疫抑制微环境的“基因集签名”。
-
-- ### **4C. 空间生态位通路富集分析气泡图 (GSVA / GSEA Bubble Plot)**
-
-  - **内容：** 展示各个空间生态位激活的经典通路。重点突出免疫抑制生态位（Tumor Edge）中 **TGF-beta 信号通路、EMT（上皮-间质转化）、Angiogenesis（血管生成）以及 IL6-JAK-STAT3** 通路的显著富集。
-
-## 🛡️ Figure 5: 独立空间转录组切片（CHC20）的标签迁移与盲测验证
-
-> **目的：** 实施你提出的“主分析+独立验证”策略，利用模型将 HCC4R 的发现推广到 CHC20，证明规律的泛化性。
-
-- ### **5A. 验证集（CHC20）区域标签迁移预测图 (Domain Label Transfer Spatial Plot)**
-
-  - **内容：** 展示利用 `HCC4R` 训练的随机森林分类器在 `CHC20` 切片上的预测结果。检查模型自动识别出的 `Tumor Edge` 是否在解剖学上依然位于肿瘤边界。
-
-- ### **5B. 验证集微环境评分与特征基因的一致性对比图 (Validation Violin / Cross-Cohort Comparison)**
-
-  - **内容：** 左右并排。展示 `HCC4R` 和 `CHC20` 两个切片在各自对应的生态位（如 Tumor Edge）中，核心免疫抑制特征基因和评分的表达趋势是否高度同步（$p$ 值的 Wilcoxon 检验）。
-
-- ### **5C. 空间半径邻域敏感性分析与参数扫描图 (`sensitivity_analysis_grid.png`)**
-
-  - **内容：** 对应你代码中的 Step 11 和 Step 15（k × quantile 网格搜索）。展示随着邻域半径（radius_multiplier）调整，该免疫抑制生态位的生物学信号依然稳定存在，证明结论不是算法调参的偶然产物。
-
-## ⏳ Figure 6: 外部大临床队列的预后验证与临床意义 (Translational Value)
-
-> **目的：** 照应标题中的“预后验证”，将空间生态位衍生出的特征基因集（Signature）带入百例级临床样本（如 TCGA-LIHC 或 ICGC 肝癌队列），证明该空间微环境不仅存在，而且深刻影响患者的生存。
-
-- ### **6A. 临床队列生存分析生存曲线 (Kaplan-Meier Survival Curve)**
-
-  - **内容：** 根据你在空间免疫抑制生态位中筛选出的特征基因集，对 TCGA/ICGC 患者进行单样本基因集富集分析（ssGSEA）打分，分为 High-score 和 Low-score 两组。展示两组的总体生存率（OS）或无进展生存率（PFS）差异。
-  - **预期结果：** 免疫抑制生态位评分高的患者，生存预后显著极差（$p < 0.05$）。
-
-- ### **6B. 独立预后因素的 Cox 回归分析森林图 (Forest Plot for Cox Regression)**
-
-  - **内容：** 展示单因素和多因素 Cox 回归分析结果。将生态位特征评分与临床指标（Age, Gender, TNM Stage, Grade）进行协同回归。
-  - **预期结果：** 证明该免疫抑制空间微环境评分是肝癌患者的**独立不良预后因素**（HR > 1）。
-
-- ### **6C. 临床病理特征关联热图 / 箱线图 (Clinical Correlation Plot)**
-
-  - **内容：** 展示该空间微环境评分在不同临床分期（Stage I-IV）或病理分级（Grade 1-4）中的表达差异。通常随着恶性程度增高，该微环境评分显著上升。
+- **做法：**
+  - 针对你在 Step 2/4 中构建的空间半径邻域，分别计算两张切片中，当 `Malignant` 丰度高时，其邻域内 `Treg` 的富集概率（共定位系数）。
+  - 如果在 `HCC4R` 中发现 Treg 显著在肿瘤边缘（`tumor_edge`）与某种基质细胞共定位，且在 `CHC20` 的对应预测区域中也观察到这种显著的统计学共定位，这就完成了完美的生物学机制验证。
