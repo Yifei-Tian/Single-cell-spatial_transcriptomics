@@ -41,21 +41,29 @@
       compute_spot_cell_proportion()       - 将后验丰度矩阵归一化为细胞比例，
                                              生成每个 spot 的细胞类型组成比例表
 
-【输入文件】（由调用方 run_preprocessing.py 传入，本模块不直接读取磁盘文件）
-    data/scRNA_reference.h5ad       - scRNA-seq 参考数据（由 load_scrna_h5ad 接收）
-    data/chc20_visium.h5ad          - CHC20 Visium 空间数据（由 load_visium 接收）
-    data/chc23_visium.h5ad          - CHC23 Visium 空间数据（由 load_visium 接收）
-    或 data/CHC20_Visium/           - Space Ranger 输出目录（load_visium 支持直接读取原始格式）
-    或 data/CHC23_Visium/
+【调用关系】
+    本模块（utils/preprocessing.py）由以下脚本调用：
+      - code/pipeline/run_preprocessing.py（当前主用版本，参数化，支持多数据集）
+        调用方式：run_hcc4r.py → pipeline/run_preprocessing.py → utils/preprocessing.py
+      - 注意：code/preprocessing.py（根目录）为同功能的旧版本，已停止维护
 
-【输出形式】（以 Python 返回值形式传出，由 run_preprocessing.py 负责保存到磁盘）
-    inf_aver DataFrame               - Cell2location 参考签名矩阵（基因 × 细胞类型）
-    adata_vis AnnData                - 附加细胞丰度估计的空间 AnnData
-    proportion DataFrame             - 每个 spot 的细胞类型比例表（spot × 细胞类型）
+【输入形式】（由调用方传入，本模块不直接读取磁盘文件）
+    scRNA-seq AnnData  - 参考数据（由 load_scrna_h5ad 加载后传入）
+                         对应：data/scRNA_reference.h5ad
+    Visium AnnData     - 空间转录组数据（由 load_visium 加载后传入）
+                         对应：data/HCC4R/（主分析）或 data/CHC20/（验证）
+                               等任意 Space Ranger 输出目录
+
+【输出形式】（以 Python 返回值传出，由 pipeline/run_preprocessing.py 负责保存到磁盘）
+    inf_aver DataFrame   - Cell2location 参考签名矩阵（基因 × 细胞类型）
+    adata_vis AnnData    - 附加细胞丰度估计的空间 AnnData
+                           保存为：results/<SAMPLE_NAME>/adata_vis_post.h5ad
+    proportion DataFrame - 每个 spot 的细胞类型比例表（spot × 细胞类型）
+                           保存为：results/<SAMPLE_NAME>/spot_cell_proportion_<SAMPLE_NAME>.csv
 
 【依赖关系】
-    上游：pre.py（生成 .h5ad 数据文件）
-    下游：run_preprocessing.py（调用本模块所有函数，保存结果）
+    上游：utils/pre.py（生成 .h5ad 数据文件）
+    下游：code/pipeline/run_preprocessing.py（主调用方，负责磁盘 I/O 和结果保存）
 ================================================================================
 """
 from time import perf_counter

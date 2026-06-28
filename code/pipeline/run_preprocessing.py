@@ -43,12 +43,36 @@
     需通过 adata.obs["sample"] 识别切片来源，并在建立 kNN 空间邻域时限制在
     同一切片内（通过 --per-sample-neighbors 参数激活），避免跨切片物理邻居错误。
 
-【输入文件】
-    data/scRNA_reference.h5ad    - scRNA-seq 参考数据（pre.py 生成）
-    data/CHC20_Visium/           - CHC20 Visium Space Ranger 输出目录
-    data/HCC4R/                  - HCC4R Visium Space Ranger 输出目录
+【调用入口】
+    # HCC4R 主分析（推荐，通过入口脚本调用）：
+    python code/run_hcc4r.py                 # Step 1 + Step 2 + 可选 Step 3
+    python code/run_hcc4r.py --step1-only    # 仅 Step 1
 
-【输出文件（联合分析模式，保存于 results/joint_HCC4R_CHC20/）】
+    # 直接调用本脚本（高级用法）：
+    python code/pipeline/run_preprocessing.py \
+        --path-scrna  data/scRNA_reference.h5ad \
+        --path-sample1 data/HCC4R \
+        --sample1-name HCC4R \
+        --output-dir   results/HCC4R
+
+【输入文件】
+    data/scRNA_reference.h5ad    - scRNA-seq 参考数据（utils/pre.py 生成）
+    data/HCC4R/                  - HCC4R Visium Space Ranger 输出目录（主分析）
+    data/CHC20_Visium/           - CHC20 Visium Space Ranger 输出目录（验证，可选）
+
+【输出文件（单切片模式，以 HCC4R 为例，保存于 results/HCC4R/）】
+    adata_vis_post.h5ad                   - HCC4R 反卷积后的空间 AnnData（Step 2 主输入）
+    adata_sc_post.h5ad                    - scRNA-seq 参考数据（含后验签名）
+    spot_cell_proportion_HCC4R.csv        - HCC4R spot 细胞类型比例表
+    shared_genes_HCC4R.txt               - scRNA × Visium 共享基因列表
+    regression_training_history_HCC4R.png - RegressionModel 训练曲线
+    t_cell_dotplot_horizontal.png         - Treg 标志基因横版气泡图（论文 Figure 1D）
+    scrna_tsne_celltype.png               - scRNA-seq tSNE 细胞类型图（论文 Figure 1B）
+    scrna_celltype_marker_heatmap.png     - 细胞类型 Marker 热图（论文 Figure 1C）
+    cross_slice_comparison/               - 多切片细胞组成对比图（有验证切片时生成）
+    run_preprocessing.log                 - 全流程运行日志
+
+【输出文件（联合分析模式，joint_mode=True，保存于 results/joint_HCC4R_CHC20/）】
     adata_vis_post_HCC4R.h5ad            - HCC4R 单独反卷积结果
     adata_vis_post_CHC20.h5ad            - CHC20 单独反卷积结果
     adata_vis_post_joint.h5ad            - 两切片合并结果（含 obs["sample"] 列）
@@ -60,12 +84,13 @@
     regression_training_history_joint.png - 统一 RegressionModel 训练曲线
     t_cell_dotplot_horizontal.png        - Treg 标志基因横版气泡图
     cross_slice_comparison/              - 两切片细胞组成对比图
-    run_preprocessing.log                - 全流程运行日志
 
 【依赖关系】
-    上游：pre.py（生成 .h5ad 数据文件）
-    下游：run_spatial_niche_analysis.py（读取 adata_vis_post.h5ad 或
-          adata_vis_post_joint.h5ad 进行 Niche 分析）
+    上游：utils/pre.py（生成 .h5ad 数据文件）
+    下游：pipeline/run_spatial_niche_analysis.py
+          （读取 adata_vis_post.h5ad 进行 Niche 分析；通过 run_hcc4r.py 调用）
+          pipeline/run_paper_figures.py
+          （读取 adata_vis_post.h5ad + adata_sc_post.h5ad 生成论文图表）
 
 【参考文献】
     - Kleshchevnikov et al., Nature Biotechnology, 2022 (Cell2location)
