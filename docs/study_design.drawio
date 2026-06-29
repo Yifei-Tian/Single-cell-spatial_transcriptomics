@@ -1,0 +1,158 @@
+<mxGraphModel dx="1200" dy="2800" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1600" pageHeight="1100" background="#ffffff" math="0" shadow="0">
+  <root>
+    <mxCell id="0" />
+    <mxCell id="1" parent="0" />
+    
+    <!-- ==================== 标题 ==================== -->
+    <mxCell id="title" value="Study Design: Spatial Immunosuppressive Niche in Hepatocellular Carcinoma" style="text;html=1;align=center;verticalAlign=middle;resizable=0;points=[];autosize=1;strokeColor=none;fillColor=none;fontStyle=1;fontSize=16;fontColor=#3c3c3c;" parent="1" vertex="1">
+      <mxGeometry x="325" y="30" width="550" height="30" as="geometry" />
+    </mxCell>
+    
+    <!-- ==================== 第一列虚线外框：scRNA-seq Reference ==================== -->
+    <mxCell id="col1_box" value="" style="rounded=1;whiteSpace=wrap;html=1;strokeWidth=1.5;strokeColor=#A0BCD8;fillColor=none;dashed=1;dashPattern=8 4;arcSize=3;" parent="1" vertex="1">
+      <mxGeometry x="40" y="100" width="320" height="620" as="geometry" />
+    </mxCell>
+    <mxCell id="col1_title" value="&#x2460; scRNA-seq Reference" style="text;html=1;align=center;verticalAlign=middle;resizable=0;points=[];autosize=1;strokeColor=none;fillColor=#ffffff;fontStyle=1;fontSize=13;fontColor=#5A7FA0;labelBackgroundColor=#ffffff;" parent="1" vertex="1">
+      <mxGeometry x="100" y="86" width="180" height="28" as="geometry" />
+    </mxCell>
+    
+    <!-- 节点 1-1 -->
+    <mxCell id="n1_1" value="Liver Cancer scRNA-seq&#xa;(Multi-patient Atlas)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8F0F8;strokeColor=#C0D4E8;fontColor=#3C5A78;fontSize=11;fontStyle=0;arcSize=20;strokeWidth=1;" parent="1" vertex="1">
+      <mxGeometry x="90" y="140" width="220" height="56" as="geometry" />
+    </mxCell>
+    
+    <!-- 节点 1-2 -->
+    <mxCell id="n1_2" value="Cell Clustering &amp;&#xa;Type Annotation" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8F0F8;strokeColor=#C0D4E8;fontColor=#3C5A78;fontSize=11;fontStyle=0;arcSize=20;strokeWidth=1;" parent="1" vertex="1">
+      <mxGeometry x="90" y="256" width="220" height="56" as="geometry" />
+    </mxCell>
+    
+    <!-- 节点 1-3 -->
+    <mxCell id="n1_3" value="Treg Subcluster&#xa;Identification (FOXP3+)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8F0F8;strokeColor=#C0D4E8;fontColor=#3C5A78;fontSize=11;fontStyle=0;arcSize=20;strokeWidth=1;" parent="1" vertex="1">
+      <mxGeometry x="90" y="372" width="220" height="56" as="geometry" />
+    </mxCell>
+    
+    <!-- 节点 1-4 (稍深) -->
+    <mxCell id="n1_4" value="Cell-type Reference&#xa;Signature Matrix" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#D6E4F0;strokeColor=#A8C4DC;fontColor=#3C5A78;fontSize=11;fontStyle=1;arcSize=20;strokeWidth=1;" parent="1" vertex="1">
+      <mxGeometry x="90" y="488" width="220" height="56" as="geometry" />
+    </mxCell>
+    
+    <!-- 列1连线 -->
+    <mxCell id="e1_1" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;strokeColor=#B0C8E0;strokeWidth=1;endArrow=classic;endSize=5;" parent="1" source="n1_1" target="n1_2" edge="1">
+      <mxGeometry relative="1" as="geometry" />
+    </mxCell>
+    <mxCell id="e1_2" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;strokeColor=#B0C8E0;strokeWidth=1;endArrow=classic;endSize=5;" parent="1" source="n1_2" target="n1_3" edge="1">
+      <mxGeometry relative="1" as="geometry" />
+    </mxCell>
+    <mxCell id="e1_3" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;strokeColor=#B0C8E0;strokeWidth=1;endArrow=classic;endSize=5;" parent="1" source="n1_3" target="n1_4" edge="1">
+      <mxGeometry relative="1" as="geometry" />
+    </mxCell>
+    
+    <!-- ==================== 第二列虚线外框：Spatial Transcriptomics ==================== -->
+    <mxCell id="col2_box" value="" style="rounded=1;whiteSpace=wrap;html=1;strokeWidth=1.5;strokeColor=#D4AA8A;fillColor=none;dashed=1;dashPattern=8 4;arcSize=3;" parent="1" vertex="1">
+      <mxGeometry x="420" y="100" width="360" height="620" as="geometry" />
+    </mxCell>
+    <mxCell id="col2_title" value="&#x2461; Spatial Transcriptomics" style="text;html=1;align=center;verticalAlign=middle;resizable=0;points=[];autosize=1;strokeColor=none;fillColor=#ffffff;fontStyle=1;fontSize=13;fontColor=#9A6E50;labelBackgroundColor=#ffffff;" parent="1" vertex="1">
+      <mxGeometry x="490" y="86" width="200" height="28" as="geometry" />
+    </mxCell>
+    
+    <!-- 节点 2-1 -->
+    <mxCell id="n2_1" value="HCC4R Visium Slide&#xa;(Discovery Cohort)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F8EDE4;strokeColor=#E0CCBA;fontColor=#7A5A3E;fontSize=11;fontStyle=0;arcSize=20;strokeWidth=1;" parent="1" vertex="1">
+      <mxGeometry x="490" y="140" width="220" height="56" as="geometry" />
+    </mxCell>
+    
+    <!-- 节点 2-2 -->
+    <mxCell id="n2_2" value="Cell2location&#xa;Deconvolution" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F0EBE6;strokeColor=#D8D0C8;fontColor=#5A4E42;fontSize=11;fontStyle=0;arcSize=20;strokeWidth=1;" parent="1" vertex="1">
+      <mxGeometry x="490" y="256" width="220" height="56" as="geometry" />
+    </mxCell>
+    
+    <!-- 节点 2-3 -->
+    <mxCell id="n2_3" value="Spatial Niche Discovery&#xa;(kNN + Leiden)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F0EBE6;strokeColor=#D8D0C8;fontColor=#5A4E42;fontSize=11;fontStyle=0;arcSize=20;strokeWidth=1;" parent="1" vertex="1">
+      <mxGeometry x="490" y="372" width="220" height="56" as="geometry" />
+    </mxCell>
+    
+    <!-- 节点 2-4 -->
+    <mxCell id="n2_4" value="CHC20 Visium Slide&#xa;(Validation, Label Transfer)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FDF3E0;strokeColor=#E8D8B8;fontColor=#6B5020;fontSize=11;fontStyle=0;arcSize=20;strokeWidth=1;" parent="1" vertex="1">
+      <mxGeometry x="490" y="488" width="220" height="56" as="geometry" />
+    </mxCell>
+    
+    <!-- 列2连线 -->
+    <mxCell id="e2_1" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;strokeColor=#D4B8A0;strokeWidth=1;endArrow=classic;endSize=5;" parent="1" source="n2_1" target="n2_2" edge="1">
+      <mxGeometry relative="1" as="geometry" />
+    </mxCell>
+    <mxCell id="e2_2" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;strokeColor=#D4B8A0;strokeWidth=1;endArrow=classic;endSize=5;" parent="1" source="n2_2" target="n2_3" edge="1">
+      <mxGeometry relative="1" as="geometry" />
+    </mxCell>
+    <mxCell id="e2_3" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;strokeColor=#D4B8A0;strokeWidth=1;endArrow=classic;endSize=5;" parent="1" source="n2_3" target="n2_4" edge="1">
+      <mxGeometry relative="1" as="geometry" />
+    </mxCell>
+    
+    <!-- ==================== 第三列虚线外框：Clinical Validation ==================== -->
+    <mxCell id="col3_box" value="" style="rounded=1;whiteSpace=wrap;html=1;strokeWidth=1.5;strokeColor=#8CC08C;fillColor=none;dashed=1;dashPattern=8 4;arcSize=3;" parent="1" vertex="1">
+      <mxGeometry x="840" y="100" width="320" height="620" as="geometry" />
+    </mxCell>
+    <mxCell id="col3_title" value="&#x2462; Clinical Validation" style="text;html=1;align=center;verticalAlign=middle;resizable=0;points=[];autosize=1;strokeColor=none;fillColor=#ffffff;fontStyle=1;fontSize=13;fontColor=#4A7A4A;labelBackgroundColor=#ffffff;" parent="1" vertex="1">
+      <mxGeometry x="910" y="86" width="160" height="28" as="geometry" />
+    </mxCell>
+    
+    <!-- 节点 3-1 -->
+    <mxCell id="n3_1" value="TCGA-LIHC / ICGC&#xa;(n &gt; 300 patients)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E6F2E6;strokeColor=#BCD8BC;fontColor=#3A6A3A;fontSize=11;fontStyle=0;arcSize=20;strokeWidth=1;" parent="1" vertex="1">
+      <mxGeometry x="890" y="140" width="220" height="56" as="geometry" />
+    </mxCell>
+    
+    <!-- 节点 3-2 -->
+    <mxCell id="n3_2" value="ssGSEA Scoring&#xa;(Niche Signature Genes)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E6F2E6;strokeColor=#BCD8BC;fontColor=#3A6A3A;fontSize=11;fontStyle=0;arcSize=20;strokeWidth=1;" parent="1" vertex="1">
+      <mxGeometry x="890" y="256" width="220" height="56" as="geometry" />
+    </mxCell>
+    
+    <!-- 节点 3-3 -->
+    <mxCell id="n3_3" value="Survival Stratification&#xa;(High vs Low)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E6F2E6;strokeColor=#BCD8BC;fontColor=#3A6A3A;fontSize=11;fontStyle=0;arcSize=20;strokeWidth=1;" parent="1" vertex="1">
+      <mxGeometry x="890" y="372" width="220" height="56" as="geometry" />
+    </mxCell>
+    
+    <!-- 节点 3-4 (稍深) -->
+    <mxCell id="n3_4" value="Kaplan-Meier Curve&#xa;&amp; Cox Regression" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#D0E8D0;strokeColor=#A0C8A0;fontColor=#3A6A3A;fontSize=11;fontStyle=1;arcSize=20;strokeWidth=1;" parent="1" vertex="1">
+      <mxGeometry x="890" y="488" width="220" height="56" as="geometry" />
+    </mxCell>
+    
+    <!-- 列3连线 -->
+    <mxCell id="e3_1" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;strokeColor=#A0C8A0;strokeWidth=1;endArrow=classic;endSize=5;" parent="1" source="n3_1" target="n3_2" edge="1">
+      <mxGeometry relative="1" as="geometry" />
+    </mxCell>
+    <mxCell id="e3_2" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;strokeColor=#A0C8A0;strokeWidth=1;endArrow=classic;endSize=5;" parent="1" source="n3_2" target="n3_3" edge="1">
+      <mxGeometry relative="1" as="geometry" />
+    </mxCell>
+    <mxCell id="e3_3" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;strokeColor=#A0C8A0;strokeWidth=1;endArrow=classic;endSize=5;" parent="1" source="n3_3" target="n3_4" edge="1">
+      <mxGeometry relative="1" as="geometry" />
+    </mxCell>
+    
+    <!-- ==================== 跨列连线 ==================== -->
+    <!-- col1 -> col2: cell_state_df (虚线) -->
+    <mxCell id="cross_1" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;strokeColor=#AAAAAA;strokeWidth=1;dashed=1;dashPattern=6 4;endArrow=classic;endSize=4;" parent="1" source="n1_4" target="n2_4" edge="1">
+      <mxGeometry relative="1" as="geometry">
+        <Array as="points">
+          <mxPoint x="410" y="516" />
+        </Array>
+      </mxGeometry>
+    </mxCell>
+    <mxCell id="cross_1_label" value="cell_state_df" style="edgeLabel;html=1;align=center;verticalAlign=middle;resizable=0;points=[];fontSize=9;fontColor=#999999;fontStyle=2;labelBackgroundColor=#ffffff;" parent="cross_1" vertex="1" connectable="0">
+      <mxGeometry x="-0.05" y="-1" relative="1" as="geometry">
+        <mxPoint y="-10" as="offset" />
+      </mxGeometry>
+    </mxCell>
+    
+    <!-- col2 -> col3: Signature Genes (虚线) -->
+    <mxCell id="cross_2" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;strokeColor=#AAAAAA;strokeWidth=1;dashed=1;dashPattern=6 4;endArrow=classic;endSize=4;" parent="1" source="n2_3" target="n3_3" edge="1">
+      <mxGeometry relative="1" as="geometry">
+        <Array as="points">
+          <mxPoint x="830" y="400" />
+        </Array>
+      </mxGeometry>
+    </mxCell>
+    <mxCell id="cross_2_label" value="Signature Genes" style="edgeLabel;html=1;align=center;verticalAlign=middle;resizable=0;points=[];fontSize=9;fontColor=#999999;fontStyle=2;labelBackgroundColor=#ffffff;" parent="cross_2" vertex="1" connectable="0">
+      <mxGeometry x="0.05" y="-1" relative="1" as="geometry">
+        <mxPoint y="-10" as="offset" />
+      </mxGeometry>
+    </mxCell>
+    
+  </root>
+</mxGraphModel>
