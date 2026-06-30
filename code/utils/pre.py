@@ -16,29 +16,28 @@
             基因索引自动识别（Ensembl 风格 vs Symbol 风格）
     - 输出：data/scRNA_reference.h5ad
 
-  任务二：Visium 空间转录组数据转换
-    - 当前主数据集：HCC4R（Discovery Cohort）+ CHC20（Validation Cohort）
+  任务二：Visium 空间转录组数据转换（CHC20 / CHC23 各一张切片）
     - 输入：Space Ranger 输出目录（含 filtered_feature_bc_matrix/、spatial/ 子目录）
     - 处理：读取 10x Visium 原始格式，保留空间坐标元数据
-    - 输出（注：路径配置中 PATH_CHC20/PATH_CHC23 为历史变量名，实际可指向任意切片）：
-        data/chc20_visium.h5ad  （对应 CHC20 Visium 切片）
-        data/chc23_visium.h5ad  （历史保留；当前可改指 HCC4R 或其他切片）
+    - 输出：data/chc20_visium.h5ad、data/chc23_visium.h5ad
 
   任务三（可选）：双切片合并
-    - 将两张 Visium AnnData 合并，为跨样本批次分析做准备
+    - 将 CHC20 与 CHC23 的 Visium AnnData 合并，为跨样本批次分析做准备
     - 输出：data/merged_visium.h5ad
 
 【输入文件】
     data/GSE149614_HCC.scRNAseq.S71915.count.txt  - scRNA-seq 原始 count 矩阵（基因 × 细胞）
     data/GSE149614_HCC.metadata.updated.txt        - scRNA-seq 细胞元数据（含细胞类型注释）
-    data/HCC4R/   或 data/CHC20_Visium/            - 主分析 / 验证切片 Space Ranger 输出目录
+    data/CHC20_Visium/                             - CHC20 样本 Space Ranger 输出目录
+                                                     （含 filtered_feature_bc_matrix/、spatial/ 等）
+    data/CHC23_Visium/                             - CHC23 样本 Space Ranger 输出目录
                                                      （含 filtered_feature_bc_matrix/、spatial/ 等）
 
 【输出文件】
     data/scRNA_reference.h5ad   - 转换后的 scRNA-seq AnnData 对象
-    data/chc20_visium.h5ad      - Visium 切片 1 转换结果（变量名历史为 CHC20）
-    data/chc23_visium.h5ad      - Visium 切片 2 转换结果（变量名历史为 CHC23）
-    data/merged_visium.h5ad     - 合并的 Visium AnnData（可选，--no-merge 可跳过）
+    data/chc20_visium.h5ad      - CHC20 Visium 转换后的空间转录组 AnnData 对象
+    data/chc23_visium.h5ad      - CHC23 Visium 转换后的空间转录组 AnnData 对象
+    data/merged_visium.h5ad     - CHC20 + CHC23 合并的 Visium AnnData 对象（可选，--no-merge 可跳过）
 
 【调用方式】
     python pre.py                  # 转换所有数据（默认）
@@ -48,8 +47,7 @@
 
 【依赖关系】
     上游：无（分析起点，直接读取原始数据文件）
-    下游：code/pipeline/run_preprocessing.py（读取本脚本生成的 .h5ad 文件；
-          当前主入口为 code/run_hcc4r.py → pipeline/run_preprocessing.py）
+    下游：run_preprocessing.py（读取本脚本生成的 .h5ad 文件）
 
 【参考文献】
     - Luecken & Theis, Molecular Systems Biology, 2019 (scRNA-seq 最佳实践)

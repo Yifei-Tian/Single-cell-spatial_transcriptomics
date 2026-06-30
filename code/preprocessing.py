@@ -1,24 +1,14 @@
 """
 ================================================================================
-模块名称: preprocessing.py（根目录旧版，已停止维护）
-功能概述: 数据预处理与 Cell2location 反卷积核心函数库 —— Step 1 函数模块（遗留版本）
+模块名称: preprocessing.py
+功能概述: 数据预处理与 Cell2location 反卷积核心函数库 —— Step 1 函数模块
 ================================================================================
 
-【⚠ 版本说明】
-    本模块为早期开发版本，由根目录 run_preprocessing.py（旧版入口）调用。
-    当前项目已迁移至参数化版本：
-
-      现用模块：code/pipeline/run_preprocessing.py
-               （由 code/run_hcc4r.py 通过 Python API 调用，
-                支持任意数据集路径、多模式运行）
-
-    本模块与 code/pipeline/run_preprocessing.py 功能基本等价，
-    仅保留作历史参考，不建议在新分析中直接导入。
-
 【模块说明】
-    封装了 scRNA-seq 和 Visium 数据预处理的核心函数，以及 Cell2location
-    两阶段建模（参考签名学习 → 空间反卷积）的完整流程实现。
-    本模块本身不直接读写磁盘文件，仅以 Python 对象传递数据。
+    本模块封装了单细胞转录组（scRNA-seq）和空间转录组（Visium）数据预处理的
+    核心函数，以及 Cell2location 两阶段建模（参考签名学习 → 空间反卷积）的完整
+    流程实现。所有函数均通过 run_preprocessing.py 主脚本统一调用，本模块本身
+    不直接读写磁盘文件，仅以 Python 对象（AnnData / DataFrame）形式传递数据。
 
 【函数索引】
     环境检查：
@@ -32,36 +22,40 @@
                                              保留 is_tissue=1 的有组织 spot
 
     基因对齐与细胞亚群处理：
-      align_shared_genes()                 - 取 scRNA 与 Visium 的共享基因子集
+      align_shared_genes()                 - 取 scRNA 与 Visium 的共享基因子集，
+                                             确保建模时基因空间一致
       subset_t_cells()                     - 按细胞类型 / 聚类标签提取 T/NK 细胞亚群
       assign_treg_label()                  - 将指定 T/NK 聚类簇重注释为 Treg 亚型
 
-    Cell2location 建模：
-      setup_and_train_regression_model()   - 训练 RegressionModel（第一阶段）并
-                                             运行 Cell2location 空间建模（第二阶段）
-      export_signatures()                  - 导出后验细胞类型签名
+    Cell2location 第一阶段（参考签名学习）：
+      setup_and_train_regression_model()   - 以 scRNA-seq 训练 RegressionModel，
+                                             同时在同一调用内完成 Cell2location
+                                             空间建模（第二阶段），输出细胞丰度估计
+      export_signatures()                  - 从 RegressionModel 导出后验细胞类型签名
       extract_cell_state_df()              - 提取 inf_aver 参考签名矩阵（gene × cell_type）
       sanitize_cell_state_df()             - 清理签名矩阵中的 NaN / 负值 / 全零列
 
     后处理：
-      _strip_abundance_prefix()            - 去除 Cell2location 输出列名内部前缀
+      _strip_abundance_prefix()            - 去除 Cell2location 输出列名的内部前缀
                                              （如 "means_cell_abundance_w_sf_Treg" → "Treg"）
-      compute_spot_cell_proportion()       - 将后验丰度矩阵归一化为 spot 细胞类型比例表
+      compute_spot_cell_proportion()       - 将后验丰度矩阵归一化为细胞比例，
+                                             生成每个 spot 的细胞类型组成比例表
 
-【输入形式】（由调用方传入，本模块不直接读取磁盘文件）
-    scRNA-seq AnnData  - 参考数据（由 load_scrna_h5ad 加载后传入）
-    Visium AnnData     - 空间转录组数据（由 load_visium 加载后传入）
-    data/CHC20_Visium/ - Space Ranger 输出目录（load_visium 支持直接读取原始格式）
+【输入文件】（由调用方 run_preprocessing.py 传入，本模块不直接读取磁盘文件）
+    data/scRNA_reference.h5ad       - scRNA-seq 参考数据（由 load_scrna_h5ad 接收）
+    data/chc20_visium.h5ad          - CHC20 Visium 空间数据（由 load_visium 接收）
+    data/chc23_visium.h5ad          - CHC23 Visium 空间数据（由 load_visium 接收）
+    或 data/CHC20_Visium/           - Space Ranger 输出目录（load_visium 支持直接读取原始格式）
+    或 data/CHC23_Visium/
 
-【输出形式】（以 Python 返回值传出，由调用方负责保存到磁盘）
-    inf_aver DataFrame   - Cell2location 参考签名矩阵（基因 × 细胞类型）
-    adata_vis AnnData    - 附加细胞丰度估计的空间 AnnData
-    proportion DataFrame - 每个 spot 的细胞类型比例表（spot × 细胞类型）
+【输出形式】（以 Python 返回值形式传出，由 run_preprocessing.py 负责保存到磁盘）
+    inf_aver DataFrame               - Cell2location 参考签名矩阵（基因 × 细胞类型）
+    adata_vis AnnData                - 附加细胞丰度估计的空间 AnnData
+    proportion DataFrame             - 每个 spot 的细胞类型比例表（spot × 细胞类型）
 
 【依赖关系】
-    上游：utils/pre.py（生成 .h5ad 数据文件）
-    下游：run_preprocessing.py（根目录旧版入口，调用本模块）
-          → 新项目请改用 pipeline/run_preprocessing.py
+    上游：pre.py（生成 .h5ad 数据文件）
+    下游：run_preprocessing.py（调用本模块所有函数，保存结果）
 ================================================================================
 """
 from time import perf_counter

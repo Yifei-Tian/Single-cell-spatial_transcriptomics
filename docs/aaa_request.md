@@ -1,53 +1,89 @@
 # 需求文档
 
-### 第一个文件（上游解卷积）：保持“统一训练，分开预测”
+仔细阅读我的项目代码，根据以下需求修改代码，删除没有必要的代码，并同步修改readme和每个代码文件最前面的介绍
 
-你目前的 Step 5 和 Step 6 设计得非常优雅：**“训练一个统一的 RegressionModel，分别对两张切片做 Cell2location”**。这个完全不需要改！因为用同一个单细胞基准去解卷积两张切片，才能保证两者的细胞比例在同一尺度下，这是后续验证的基础。
+1. 我目前的项目代码在 Visium spot 级别做 Mann-Whitney U / Wilcoxon rank-sum 时，p 值和 FDR 极小，将这个检验筛选 signature genes 的过程修改为
 
-- **需要修改的地方：**
-  - **取消 Step 7（合并两切片结果）：** 绝对不要在这里把它们合并（Concat）。保持 `HCC4R` 和 `CHC20` 为两个独立的 AnnData 对象（例如 `adata_A` 和 `adata_B`），分别保存。
-  - **修改 Step 8（一致性对比）：** 此时不是对比“一致性”，而是分别观察两张切片各自的细胞分布是否符合各自的解剖结构。
+   ```
+   保留条件：
+       FDR_block < 0.1
+       and AUC_block > 0.60
+       and (log2FC > 0.3 or delta_frac > 0.10)
+   
+   排序：
+       signature_rank_score =
+           0.35 * minmax(log2FC)
+         + 0.35 * minmax(delta_frac)
+         + 0.30 * minmax(AUC)
+   ```
 
-### 第二个文件（下游空间分析）：彻底转为“A 建立规律 $\rightarrow$ B 验证”
+   在修改保留阈值时判断一下保留的基因个数，如果小于80个的话就放松这个保留阈值。immunosuppressive_niche_signature_genes_ranked.csv 这个表格和同名的txt文件也同步更新。
 
-假设你选定 **`HCC4R` 作为主分析切片（A）**，**`CHC20` 作为验证切片（B）**。
+   将筛选出来的基因过滤掉非特异性基因，例如
 
-#### 1. 主分析切片 `HCC4R` 的运行逻辑（Step 1 ~ Step 10）
+   ```
+   housekeeping genes
+   ribosomal genes
+   mitochondrial genes
+   hemoglobin genes
+   cell-cycle genes
+   broad inflammation genes
+   tissue damage/stress genes
+   ```
 
-- **Step 6 (空间聚类):** 仅在 `HCC4R` 上构建 kNN 图并运行 Leiden 聚类，划分出不同的空间生态位（Spatial Niche / Domain）。
-- **Step 7 & 10 (语义注释与区域标注):** 根据功能评分，在 `HCC4R` 上明确定义出哪些 Spot 是 `tumor_core`、`tumor_edge`、`stroma_immune`。
-- **Step 14 (特征基因提取):** 提取出 `HCC4R` 里面定义出的这些空间区域（特别是你关注的免疫抑制微环境 `tumor_edge`）的特异性特征基因（Spatial Domain Markers）。
+   过滤后的所有基因作为后续CHC20验证和大队列生存分析的依据。
 
-#### 2. 验证切片 `CHC20` 的运行逻辑（**关键改变**）
+2. CHC20 空间转录组数据的验证过程，目前采取的是
 
-对于验证集 `CHC20`，你**不能**重新运行 Step 6 的自由 Leiden 聚类和 Step 10 的人工标注，而是要用 A 的规则去“套”它。
+   ```
+   score_i = mean(log-normalized expression of signature genes)
+   ```
 
-## ➕ 需要新添加的 3 个核心过程
+   不太合理，结果也不理想。将其修改为将所有保留基因分为三组*（目前没有运行得到的 signature genes 的基因结果，无法作为准确计算，你只需要完整这个结构，保证其能够正常运行，具体三组基因包含哪些我自己修改）*，按照以下规则进行 score 的计算和验证
 
-为了实现硬核的验证，你需要在第二个文件中添加以下三个模块：
+   三套 score：
 
-### 新过程 1：空间区域分类器迁移（Domain Label Transfer）
+   ```
+   1. immune_signature_score
+   2. stromal_ECM_signature_score
+   3. immune_stromal_niche_score
+   ```
 
-不能让验证集自己聚类，而是要用主分析切片训练一个分类器，去预测验证集的区域。
+   具体公式可以这样：
 
-- **做法：** 1. 在主分析切片（`HCC4R`）上，以 Step 6/10 得到的区域标签（`tumor_core`, `tumor_edge` 等）为 Y，以 Spot 的细胞比例/基因表达为 X，训练一个简单的机器学习模型（如**随机森林 Random Forest**，或使用 Seurat/Scanpy 自带的标签迁移算法）。
+   对每个 spot 或患者，先算 immune 模块：
 
-  \2. 将该模型直接应用到验证切片（`CHC20`）上，预测出 `CHC20` 每一个 Spot 属于哪个区域。
+   ```
+   immune_score_i =
+       mean(E_ig for g in immune genes)
+   ```
 
-  \3. **映射回空间：** 画出 `CHC20` 的空间预测图，看预测出来的 `tumor_edge` 是不是在 H&E 染色的肿瘤边缘。
+   再算 stromal/ECM 模块：
 
-### 新过程 2：特征基因表达与微环境评分的一致性检验（Score Validation）
+   ```
+   stromal_score_i =
+       mean(E_ig for g in stromal/ECM genes)
+   ```
 
-验证你在主分析中算出的各种高阶评分（如 `immunosuppressive_niche_score`）和特征基因是否在验证集中依然成立。
+   然后标准化：
 
-- **做法：**
-  1. 提取主分析（`HCC4R`）中 Step 14 筛选出的特征基因。
-  2. 在验证集（`CHC20`）被预测出的对应区域里，计算这些基因的平均表达量（可以画一个类似你提到的 `marker_heatmap`）。
-  3. **统计学检验：** 检查主分析中表现为 `tumor_edge` 高表达的评分（如 `Treg_like_score`），在验证集的 `tumor_edge` 区域是否也显著高于 `tumor_core`（用 Wilcoxon 秩和检验算 $p$ 值）。
+   ```
+   z_immune_i = z(immune_score_i)
+   z_stromal_i = z(stromal_score_i)
+   ```
 
-### 新过程 3：空间共定位与邻域模式验证（Neighborhood Pattern Match）
+   最后组合成 niche score：
 
-验证“细胞与细胞之间的空间临近关系”在两张切片中是否高度一致。
+   ```
+   immune_stromal_niche_score_i =
+       z_immune_i + z_stromal_i
+   ```
 
-- **做法：**
-  - 针对你在 Step 2/4 中构建的空间半径邻域，分别计算两张切片中，当 `Malignant` 丰度高时，其邻域内 `Treg` 的富集概率（共定位系数）。
+   最后这个过程中生成的图片改成：
+
+   ```
+   Fig.5A: CHC20 immune module spatial score
+   Fig.5B: CHC20 stromal/ECM module spatial score
+   Fig.5C: combined immune-stromal niche score
+   Fig.5D: HCC4R vs CHC20 combined score distribution
+   ```

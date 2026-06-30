@@ -106,7 +106,7 @@ scRNA-seq 参考数据集经过 Cell2location RegressionModel 训练后的 AnnDa
 
 ---
 
-### 1.5 `scrna_tsne_celltype.png`（论文 Figure 1B）
+### 1.5 `scrna_tsne_celltype.png`（论文 Figure 1B）==没有做这个图==
 
 **文件格式**：PNG 图像
 

@@ -37,11 +37,11 @@
       plot_fig4C_pathway_bubble(adata, spatial_df, out_dir, domain_col, sample_name, dpi)
 
     ── Figure 5 ──
-      plot_fig5A_label_transfer(hcc4r_niche_df, hcc4r_adata, chc20_adata, out_dir, domain_col, dpi)
-      plot_fig5B_validation_violin(hcc4r_niche_df, chc20_niche_df, out_dir, score_cols, dpi)
+      compute_signature_score(adata, signature_genes, score_name, min_genes)
+      plot_fig5A_signature_projection(chc20_adata, signature_score, out_dir, signature_name, matched_genes, dpi)
+      plot_fig5B_validation_violin(hcc4r_score_df, chc20_score_df, out_dir, score_cols, dpi)
       plot_fig5C_sensitivity(hcc4r_niche_dir, out_dir, dpi)
       _plot_sensitivity_paper(sens_df, path, dpi)         # 内部子函数
-      _plot_param_scan_paper(scan_df, path, dpi)          # 内部子函数
 
 【修改建议】
     - 修改全局配色：直接修改 PAPER_YBP / PAPER_CLUSTER_COLORS / DOMAIN_COLORS / CELLTYPE_COLORS
@@ -77,10 +77,10 @@ warnings.filterwarnings("ignore")
 # ★ 全局配色与样式常量（修改这里来统一调整论文风格）
 # ============================================================
 
-# 主色板：Yellow-Black-Purple（仿论文风格）
+# 主色板：深蓝-青绿-亮黄，适合空间丰度、signature score 和表达热图
 PAPER_YBP = LinearSegmentedColormap.from_list(
     "paper_ybp",
-    ["#3a0063", "#000000", "#f5e642"],
+    ["#253494", "#1FA187", "#FDE725"],
     N=256,
 )
 
@@ -102,17 +102,17 @@ DOMAIN_COLORS = {
 
 # 细胞类型配色
 CELLTYPE_COLORS = {
-    "Hepatocyte":  "#1f77b4",
-    "Malignant":   "#d62728",
-    "T/NK":        "#2ca02c",
-    "Treg":        "#9467bd",
-    "Myeloid":     "#ff7f0e",
-    "Fibroblast":  "#8c564b",
-    "HSC":         "#8c564b",
-    "B cell":      "#e377c2",
-    "Endothelial": "#17becf",
-    "Plasma cell": "#bcbd22",
-    "Epithelial":  "#aec7e8",
+    "Hepatocyte":  "#45496a",
+    "Malignant":   "#7d8bae",
+    "T/NK":        "#e5857b",
+    "Treg":        "#f1b2b2",
+    "Myeloid":     "#e8ccc7",
+    "Fibroblast":  "#edce7a",
+    "HSC":         "#4fb19d",
+    "B cell":      "#9ac5e5",
+    "Endothelial": "#b7bda0",
+    "Plasma cell": "#45958e",
+    "Epithelial":  "#fbe7ab",
 }
 
 # 全局 DPI（期刊投稿建议 ≥ 300）
@@ -161,6 +161,45 @@ def _expression_frame(adata: ad.AnnData) -> pd.DataFrame:
         scale = np.divide(1e4, totals, out=np.zeros_like(totals, dtype=float), where=totals > 0)
         x = np.log1p(x * scale[:, None])
     return pd.DataFrame(x, index=adata.obs_names, columns=adata.var_names)
+
+
+def compute_signature_score(
+    adata: ad.AnnData,
+    signature_genes: list[str],
+    score_name: str = "hcc4r_signature_score",
+    min_genes: int = 5,
+) -> tuple[pd.Series, list[str]]:
+    """Score each spot by the mean log-normalized expression of signature genes.
+
+    The score is deliberately computed with the same formula in discovery and
+    validation slides, so Figure 5A and 5B are directly comparable.
+    """
+    clean_genes = [str(g).strip() for g in signature_genes if str(g).strip()]
+    var_names = pd.Index(adata.var_names.astype(str))
+    upper_lookup = {g.upper(): g for g in var_names}
+
+    matched: list[str] = []
+    seen: set[str] = set()
+    for gene in clean_genes:
+        hit = gene if gene in var_names else upper_lookup.get(gene.upper())
+        if hit is not None and hit not in seen:
+            matched.append(hit)
+            seen.add(hit)
+
+    if len(matched) < min_genes:
+        logging.warning(
+            "Only %d/%d signature genes found in AnnData; need at least %d.",
+            len(matched), len(clean_genes), min_genes,
+        )
+        return pd.Series(dtype=float, name=score_name), matched
+
+    expr = _expression_frame(adata[:, matched].copy())
+    score = expr.mean(axis=1).rename(score_name)
+    logging.info(
+        "Computed %s using %d/%d signature genes.",
+        score_name, len(matched), len(clean_genes),
+    )
+    return score, matched
 
 
 def _get_abundance(adata: ad.AnnData) -> pd.DataFrame:
@@ -242,9 +281,9 @@ def plot_fig1A_workflow(out_dir: Path, dpi: int = PAPER_DPI) -> None:
     fig.patch.set_facecolor("white")
 
     # ── 三列主色 ────────────────────────────────────────────
-    c_scrna   = "#2166ac"
-    c_spatial = "#d6604d"
-    c_tcga    = "#4dac26"
+    c_scrna   = "#007a8b"
+    c_spatial = "#f93800"
+    c_tcga    = "#ffb500"
     c_bg      = "#f8f8f8"
 
     # ── 背景框 ────────────────────────────────────────────────────────
@@ -293,10 +332,10 @@ def plot_fig1A_workflow(out_dir: Path, dpi: int = PAPER_DPI) -> None:
     # ── 空间转录组中列 ─────────────────────────────────────────────
     sp_x = 7.4
     sp_items = [
-        (7.2, "HCC4R Visium Slide\n(Discovery Cohort)", "#d6604d"),
+        (7.2, "HCC4R Visium Slide\n(Discovery Cohort)", "#f93800"),
         (5.7, "Cell2location\nDeconvolution", "#888"),
         (4.2, "Spatial Niche Discovery\n(kNN + Leiden)", "#888"),
-        (2.7, "CHC20 Visium Slide\n(Validation, Label Transfer)", "#f4a442"),
+        (2.7, "CHC20 Visium Slide\n(Validation, Label Transfer)", "#ffb500"),
     ]
     for y, text, color in sp_items:
         _box(ax, sp_x, y, text, color)
@@ -674,11 +713,11 @@ def plot_fig3C_score_violins(
     # ★ 修改这里来调整各评分的颜色或新增评分
     score_configs = [
         ("Treg_like_score",               "Treg-like Score",
-         "fig3C_violin_treg_like_score.png",               "#9467bd"),
+         "fig3C_violin_treg_like_score.png",               "#007a8b"),
         ("immune_stroma_score",           "Immune-Stroma Score",
-         "fig3C_violin_immune_stroma_score.png",           "#1f77b4"),
+         "fig3C_violin_immune_stroma_score.png",           "#f93800"),
         ("immunosuppressive_niche_score", "Immunosuppressive Niche Score",
-         "fig3C_violin_immunosuppressive_niche_score.png", "#d62728"),
+         "fig3C_violin_immunosuppressive_niche_score.png", "#ffb500"),
     ]
 
     domain_col = _resolve_domain_col(spatial_df, domain_col)
@@ -1133,6 +1172,62 @@ def plot_fig4C_pathway_bubble(
 
 
 # ============================================================
+# Figure 5A: HCC4R-derived signature projection in CHC20
+# ============================================================
+
+def plot_fig5A_signature_projection(
+    chc20_adata: ad.AnnData,
+    signature_score: pd.Series,
+    out_dir: Path,
+    signature_name: str = "HCC4R-derived niche signature",
+    matched_genes: Optional[list[str]] = None,
+    dpi: int = PAPER_DPI,
+) -> None:
+    """Project an HCC4R-derived niche signature score onto CHC20 coordinates."""
+    if "spatial" not in chc20_adata.obsm:
+        logging.warning("CHC20 AnnData has no obsm['spatial']; skipping Figure 5A.")
+        return
+
+    score = signature_score.reindex(chc20_adata.obs_names).dropna()
+    if score.empty:
+        logging.warning("CHC20 signature score is empty; skipping Figure 5A.")
+        return
+
+    coords = np.asarray(chc20_adata.obsm["spatial"])
+    coord_df = pd.DataFrame(coords, index=chc20_adata.obs_names, columns=["x", "y"])
+    coord_df = coord_df.loc[score.index]
+    values = score.to_numpy(dtype=float)
+
+    if len(values) > 2:
+        vmin, vmax = np.percentile(values, [2, 98])
+        if np.isclose(vmin, vmax):
+            vmin, vmax = float(np.nanmin(values)), float(np.nanmax(values))
+    else:
+        vmin, vmax = float(np.nanmin(values)), float(np.nanmax(values))
+
+    fig, ax = plt.subplots(figsize=(7.5, 7.5))
+    sc = ax.scatter(
+        coord_df["x"], coord_df["y"],
+        c=values, s=SPOT_SIZE, cmap=PAPER_YBP,
+        vmin=vmin, vmax=vmax, linewidths=0, alpha=0.92,
+    )
+    cbar = fig.colorbar(sc, ax=ax, fraction=0.04, pad=0.02, shrink=0.68)
+    cbar.set_label("Signature score", fontsize=10)
+    cbar.ax.tick_params(labelsize=8)
+
+    gene_note = f"n={len(matched_genes)} genes" if matched_genes else "matched genes"
+    ax.set_title(
+        f"CHC20: {signature_name}\n"
+        f"Projected from HCC4R ({gene_note})",
+        fontsize=12, fontweight="bold",
+    )
+    ax.set_aspect("equal")
+    ax.axis("off")
+
+    _save(fig, out_dir / "fig5A_hcc4r_signature_projection_CHC20.png", dpi=dpi)
+
+
+# ============================================================
 # Figure 5A: CHC20 域标签迁移预测图（随机森林分类器）
 # ============================================================
 
@@ -1250,46 +1345,40 @@ def plot_fig5A_label_transfer(
 # ============================================================
 
 def plot_fig5B_validation_violin(
-    hcc4r_niche_df: pd.DataFrame,
-    chc20_niche_df: pd.DataFrame,
+    hcc4r_score_df: pd.DataFrame,
+    chc20_score_df: pd.DataFrame,
     out_dir: Path,
     score_cols: Optional[list[str]] = None,
     dpi: int = PAPER_DPI,
 ) -> None:
-    """并排小提琴图：比较 HCC4R 和 CHC20 在关键评分上的分布一致性。
+    """Compare HCC4R and CHC20 distributions of the same signature score.
 
-    每个 score 生成单独图文件。
-
-    ★ 可调参数：
-      score_cols              — 要对比的评分列名列表
-      display_names           — 评分的显示名称映射
-      figsize=(7, 5.5)        — 单张图幅
-      widths=0.6              — 小提琴宽度
-      colors_vl               — HCC4R/CHC20 颜色（"#d6604d" / "#4dac26"）
-      VIOLIN_ALPHA=0.6        — 小提琴透明度（全局常量）
+    Figure 5B now uses the HCC4R-derived signature score in both datasets,
+    matching Figure 5A's projected CHC20 score.
     """
     if score_cols is None:
-        score_cols = [
-            "immunosuppressive_niche_score",
-            "Treg_like_score",
-            "immune_stroma_score",
-        ]
+        score_cols = ["hcc4r_signature_score"]
 
-    # ★ 修改这里来调整评分的显示名称
     display_names = {
+        "hcc4r_signature_score": "HCC4R-derived Niche Signature Score",
         "immunosuppressive_niche_score": "Immunosuppressive Niche Score",
-        "Treg_like_score":               "Treg-like Score",
-        "immune_stroma_score":           "Immune-Stroma Score",
     }
 
     for score in score_cols:
-        hcc4r_vals = hcc4r_niche_df[score].dropna().to_numpy() \
-            if score in hcc4r_niche_df.columns else np.array([])
-        chc20_vals = chc20_niche_df[score].dropna().to_numpy() \
-            if score in chc20_niche_df.columns else np.array([])
+        hcc4r_vals = (
+            hcc4r_score_df[score].dropna().to_numpy(dtype=float)
+            if score in hcc4r_score_df.columns else np.array([])
+        )
+        chc20_vals = (
+            chc20_score_df[score].dropna().to_numpy(dtype=float)
+            if score in chc20_score_df.columns else np.array([])
+        )
 
-        if len(hcc4r_vals) == 0 and len(chc20_vals) == 0:
-            logging.warning("Score '%s' not in either niche df; skipping.", score)
+        if len(hcc4r_vals) == 0 or len(chc20_vals) == 0:
+            logging.warning(
+                "Score '%s' missing or empty in HCC4R/CHC20 signature scores; skipping 5B.",
+                score,
+            )
             continue
 
         if len(hcc4r_vals) > 1 and len(chc20_vals) > 1:
@@ -1301,64 +1390,57 @@ def plot_fig5B_validation_violin(
 
         fig, ax = plt.subplots(figsize=(7, 5.5))
 
-        groups = []
-        positions = []
-        colors_vl = []
-        labels = []
-        if len(hcc4r_vals) > 0:
-            groups.append(hcc4r_vals)
-            positions.append(0)
-            colors_vl.append("#d6604d")
-            labels.append("HCC4R\n(Discovery)")
-        if len(chc20_vals) > 0:
-            groups.append(chc20_vals)
-            positions.append(1)
-            colors_vl.append("#4dac26")
-            labels.append("CHC20\n(Validation)")
+        groups = [hcc4r_vals, chc20_vals]
+        positions = [0, 1]
+        colors_vl = ["#f4b41a", "#143d59"]
+        labels = ["HCC4R\n(Discovery)", "CHC20\n(Validation)"]
 
-        if not groups:
-            plt.close(fig)
-            continue
-
-        vp = ax.violinplot(groups, positions=positions,
-                           widths=0.6, showmedians=True, showextrema=True)
+        vp = ax.violinplot(
+            groups, positions=positions, widths=0.6,
+            showmedians=True, showextrema=True,
+        )
         for i, pc in enumerate(vp["bodies"]):
             pc.set_facecolor(colors_vl[i])
-            pc.set_alpha(0.6)
+            pc.set_alpha(VIOLIN_ALPHA)
             pc.set_edgecolor("white")
         vp["cmedians"].set_color("#222")
         vp["cmedians"].set_linewidth(2.2)
 
-        ax.boxplot(groups, positions=positions, widths=0.1, patch_artist=True,
-                   medianprops=dict(color="black", linewidth=2),
-                   boxprops=dict(facecolor="white", alpha=0.9, linewidth=1),
-                   whiskerprops=dict(linewidth=0), capprops=dict(linewidth=0),
-                   flierprops=dict(marker=""))
+        ax.boxplot(
+            groups, positions=positions, widths=0.1, patch_artist=True,
+            medianprops=dict(color="black", linewidth=2),
+            boxprops=dict(facecolor="white", alpha=0.9, linewidth=1),
+            whiskerprops=dict(linewidth=0), capprops=dict(linewidth=0),
+            flierprops=dict(marker=""),
+        )
 
-        if len(groups) == 2:
-            all_vals = np.concatenate(groups)
-            y_max = np.percentile(all_vals, 99)
-            y_span = np.percentile(all_vals, 99) - np.percentile(all_vals, 1)
-            bh = y_max + y_span * 0.08
-            ax.plot([0, 0, 1, 1],
-                    [bh, bh + y_span * 0.03, bh + y_span * 0.03, bh],
-                    c="#333", lw=1)
-            p_str = f"p={p_two:.3f}" if p_two >= 0.001 else "p<0.001"
-            ax.text(0.5, bh + y_span * 0.04, p_str,
-                    ha="center", va="bottom", fontsize=10, color="#333")
+        all_vals = np.concatenate(groups)
+        y_max = np.percentile(all_vals, 99)
+        y_span = np.percentile(all_vals, 99) - np.percentile(all_vals, 1)
+        if np.isclose(y_span, 0):
+            y_span = max(abs(float(y_max)), 1.0)
+        bh = y_max + y_span * 0.08
+        ax.plot([0, 0, 1, 1],
+                [bh, bh + y_span * 0.03, bh + y_span * 0.03, bh],
+                c="#333", lw=1)
+        p_str = f"p={p_two:.3f}" if p_two >= 0.001 else "p<0.001"
+        ax.text(0.5, bh + y_span * 0.04, p_str,
+                ha="center", va="bottom", fontsize=10, color="#333")
 
         ax.set_xticks(positions)
         ax.set_xticklabels(labels, fontsize=11, fontweight="bold")
         score_name = display_names.get(score, score)
         ax.set_ylabel(score_name, fontsize=11)
-        ax.set_title(f"{score_name}\nHCC4R vs CHC20 Cross-Cohort Consistency",
-                     fontsize=12, fontweight="bold")
+        ax.set_title(
+            f"{score_name}\nHCC4R vs CHC20 Distribution",
+            fontsize=12, fontweight="bold",
+        )
         ax.spines["top"].set_visible(False)
         ax.spines["right"].set_visible(False)
         ax.tick_params(axis="y", labelsize=9)
 
         safe = score.replace("/", "_")
-        _save(fig, out_dir / f"fig5B_validation_violin_{safe}.png", dpi=dpi)
+        _save(fig, out_dir / f"fig5B_signature_score_violin_{safe}.png", dpi=dpi)
 
 
 # ============================================================
@@ -1370,25 +1452,13 @@ def plot_fig5C_sensitivity(
     out_dir: Path,
     dpi: int = PAPER_DPI,
 ) -> None:
-    """直接使用 Step 2 已生成的敏感性分析和参数扫描结果，重新以论文风格绘制。
-
-    生成两张独立图：
-      - fig5C_sensitivity_stability.png  （Spearman ρ + Weighted Jaccard）
-      - fig5C_param_scan_heatmap.png     （k × quantile DEG 稳定性热图）
-    """
+    """直接使用 Step 2 已生成的敏感性分析结果，重新以论文风格绘制。"""
     sens_path = hcc4r_niche_dir / "sensitivity_analysis.csv"
     if sens_path.exists():
         sens_df = pd.read_csv(sens_path)
         _plot_sensitivity_paper(sens_df, out_dir / "fig5C_sensitivity_stability.png", dpi=dpi)
     else:
-        logging.warning("sensitivity_analysis.csv not found; skipping 5C-1.")
-
-    scan_path = hcc4r_niche_dir / "param_scan_deg_stability.csv"
-    if scan_path.exists():
-        scan_df = pd.read_csv(scan_path)
-        _plot_param_scan_paper(scan_df, out_dir / "fig5C_param_scan_heatmap.png", dpi=dpi)
-    else:
-        logging.warning("param_scan_deg_stability.csv not found; skipping 5C-2.")
+        logging.warning("sensitivity_analysis.csv not found; skipping Figure 5C.")
 
 
 def _plot_sensitivity_paper(sens_df: pd.DataFrame, path: Path, dpi: int = PAPER_DPI) -> None:
@@ -1448,29 +1518,3 @@ def _plot_sensitivity_paper(sens_df: pd.DataFrame, path: Path, dpi: int = PAPER_
     _save(fig, path, dpi=dpi)
 
 
-def _plot_param_scan_paper(scan_df: pd.DataFrame, path: Path, dpi: int = PAPER_DPI) -> None:
-    """论文版参数扫描热图（k × quantile，颜色编码 DEG 数量）。
-
-    ★ 可调参数：
-      figsize=(8, 5.5)  — 图幅大小
-      cmap="YlOrRd"     — 热图色板
-      annot=True/fmt="d" — 是否在单元格内显示数值
-    """
-    if scan_df.empty or "n_sig_deg" not in scan_df.columns:
-        logging.warning("Empty param scan df; skipping 5C-2.")
-        return
-
-    pivot = scan_df.pivot(index="k", columns="quantile", values="n_sig_deg")
-
-    fig, ax = plt.subplots(figsize=(8, 5.5))
-    sns.heatmap(pivot, cmap="YlOrRd", annot=True, fmt="d",
-                linewidths=0.5, ax=ax,
-                cbar_kws={"label": "# Significant DEGs (FDR<0.05, log₂FC>0.5)",
-                           "shrink": 0.8})
-    ax.set_xlabel("niche_high quantile threshold", fontsize=10)
-    ax.set_ylabel("kNN neighbors (k)", fontsize=10)
-    ax.set_title("Parameter Stability: k × quantile Grid Search\n"
-                 "(darker = more stable DEGs; optimal = darkest plateau region)",
-                 fontsize=11, fontweight="bold")
-
-    _save(fig, path, dpi=dpi)

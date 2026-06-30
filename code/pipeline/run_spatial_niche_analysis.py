@@ -56,16 +56,14 @@
                   Layer 3 - Gini Index 特异性评分（局灶性高表达稀有免疫基因检测）：
                     Gini>0.3 且 log2FC>0（阈值由 0.5 降至 0.3，覆盖 FOXP3 等稀有基因）；
                  绘制火山图（FC vs FDR）+ 检出率散点图（FC vs delta_frac）；
-      Step 15  参数扫描稳定性评估（k × niche_high_quantile 二维网格搜索）：
                【修复说明】原 resolution × quantile 扫描存在根本缺陷——Leiden
                resolution 仅决定聚类粒度，不影响 niche_score 数值，导致所有列
                DEG 结果完全相同，热图无意义。改为 k × quantile 扫描，k（kNN
                邻居数）直接影响邻域组成向量，进而影响 niche_score 和 DEG 结果：
-                 · 横轴：niche_high_quantile（0.70 / 0.75 / 0.80 / 0.85）
                  · 纵轴：k（8 / 10 / 15 / 20 / 25）
                  · 颜色：FDR<0.05 且 log2FC>0.5 的 DEG 数量
                选参标准：颜色最深且处于"高原"区域（与相邻格子结果相近）的
-               参数组合为推荐；若主流程参数（k=15, q=0.85）位于高原区，则合理。
+               参数组合为推荐；若主流程参数（k=15, q=0.80）位于高原区，则合理。
 
 【niche 识别策略说明（参考 docs/niche修改.md）】
     - niche 发现主体：空间邻接图 → 邻域组成向量 → Leiden 无监督聚类；
@@ -73,32 +71,13 @@
     - 双层验证：Leiden 聚类法（无监督）与评分阈值法（规则化）并排可视化对比。
 
 【输入文件】
-    <out_dir>/../adata_vis_post.h5ad   - Cell2location 反卷积后的空间 AnnData
-                                         （由 pipeline/run_preprocessing.py Step 6 生成；
-                                          通过 --adata 参数指定路径）
-                                         对于 HCC4R 主分析：results/HCC4R/adata_vis_post.h5ad
-                                         对于 CHC20 验证分析：results/CHC20/adata_vis_post.h5ad
-
-【命令行关键参数】
-    --adata                  输入 AnnData 路径（必填）
-    --out-dir                输出目录路径（默认 results/spatial_niche/）
-    --n-neighbors            kNN 邻居数（默认 15，经参数扫描验证为最优值）
-    --niche-high-quantile    niche_high 分位数阈值（默认 0.85，经参数扫描验证为最优值）
-    --per-sample-neighbors   联合分析模式：跨样本 kNN 限制在同一切片内（适用于合并 h5ad）
-    --leiden-resolution      Leiden 聚类分辨率（默认 0.5）
+    results/adata_vis_post.h5ad     - CHC20 Cell2location 反卷积后的空间 AnnData
+                                      （由 run_preprocessing.py Step 6 生成）
 
 【输出文件】
-    <out_dir>/
+    results/spatial_niche/
       spatial_niche_scores.csv                           - 完整 spot 级别评分表
-                                                           列：spot_id / 各细胞类型比例 /
-                                                               spatial_x / spatial_y /
-                                                               immunosuppressive_gene_score /
-                                                               Treg_like_score / immune_stroma_score /
-                                                               immunosuppressive_niche_score /
-                                                               niche_high / spatial_region /
-                                                               neighborhood_cluster / niche_semantic_label
       spatial_niche_parameters.csv                       - 分析参数与阈值元数据
-                                                           （记录 n_neighbors=15, niche_high_quantile=0.85 等）
       sensitivity_analysis.csv                           - 敏感性分析结果
                                                            （含 spearman_rho / weighted_jaccard 两指标）
       neighborhood_cluster_stats.csv                     - 邻域聚类簇统计信息
@@ -107,13 +86,12 @@
                                                                log2_fc / frac_high / frac_low /
                                                                delta_frac / composite_score /
                                                                pvalue / fdr
-      immunosuppressive_niche_signature_genes.txt        - 签名基因列表（TCGA ssGSEA 投影接口）
+      immunosuppressive_niche_signature_genes.txt        - 签名基因列表（TCGA 投影接口）
       prior_gene_set_auc.csv                             - Layer 2 先验基因集 AUC 检验结果
                                                            （含 frac_high / frac_low / delta_frac 列）
       gini_score_genes.csv                               - Layer 3 Gini Index 特异性基因
                                                            （Gini>0.3 且 log2FC>0，
                                                             降低阈值以覆盖 FOXP3 等稀有免疫基因）
-      param_scan_deg_stability.csv                       - 参数扫描 DEG 稳定性数据
                                                            列：k / quantile / n_sig_deg /
                                                                mean_log2fc_topN / top_genes_str
       plots/
@@ -126,7 +104,6 @@
         spatial_niche_semantic_labels.png                - 语义 niche 标签空间图
         spatial_region_labels.png                        - 辅助区域标注空间图
         spatial_niche_high_score_spots.png               - niche_high 二值分布图
-                                                           （niche_high_quantile=0.85 阈值截断结果）
         spatial_niche_cluster_vs_score_comparison.png   - 聚类法 vs 评分法对比图
         distance_to_hep_high_vs_niche_score.png         - 距离-niche评分折线图
         region_score_boxplots.png                        - 各区域评分箱线图
@@ -138,14 +115,12 @@
         niche_fraction_scatter.png                       - 检出率差值散点图
                                                            （delta_frac vs log2FC；突出 FOXP3 等
                                                             稀有免疫基因的 niche 富集，补充火山图）
-        param_scan_deg_stability_heatmap.png             - 参数扫描稳定性热图
-                                                           （k × niche_high_quantile 网格；
-                                                            最优点：k=15, q=0.85）
+    results/spatial_signature_genes.txt                  - 签名基因（TCGA 投影用途）
 
 【依赖关系】
-    上游：pipeline/run_preprocessing.py
-          （生成 adata_vis_post.h5ad；HCC4R 主分析通过 run_hcc4r.py 调用）
-    下游：pipeline/run_paper_figures.py（读取 spatial_niche_scores.csv 生成论文图表）
+    上游：run_preprocessing.py（生成 adata_vis_post.h5ad）
+    下游：run_chc23_validation.py（读取 spatial_niche/ 进行跨切片验证）
+          run_de_analysis.py（读取 spatial_niche_scores.csv 进行 DE 分析）
           tcga_survival_analysis.R（读取 spatial_signature_genes.txt 进行 ssGSEA 预后分析）
 
 【参考文献】
@@ -322,7 +297,7 @@ def _parse_args() -> argparse.Namespace:
         help="高肝细胞区域分位数阈值（辅助空间区域标注用）",
     )
     parser.add_argument(
-        "--niche-high-quantile", type=float, default=0.85,
+        "--niche-high-quantile", type=float, default=0.90,
         help="高免疫抑制 niche 分位数阈值（用于签名提取分组）",
     )
     parser.add_argument(
@@ -333,6 +308,19 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--top-niche-genes", type=int, default=80,
         help="输出 niche 特征基因数量",
+    )
+    parser.add_argument(
+        "--de-test-mode",
+        choices=["block_mwu", "spot_mwu"],
+        default="block_mwu",
+        help=(
+            "差异检验模式：block_mwu 先按空间 block 聚合后再做 Mann-Whitney，"
+            "可降低空间自相关导致的 p 值偏小；spot_mwu 为历史 spot 级检验。"
+        ),
+    )
+    parser.add_argument(
+        "--de-block-size-multiplier", type=float, default=2.0,
+        help="block_mwu 模式下的空间分块大小 = neighbor_radius × 该倍数",
     )
     parser.add_argument(
         "--per-sample-neighbors", action="store_true",
@@ -444,6 +432,62 @@ def _expression_frame(adata: ad.AnnData) -> pd.DataFrame:
         scale = np.divide(1e4, totals, out=np.zeros_like(totals, dtype=float), where=totals > 0)
         x = np.log1p(x * scale[:, None])
     return pd.DataFrame(x, index=adata.obs_names, columns=adata.var_names)
+
+
+def _build_spatial_block_ids(
+    df: pd.DataFrame,
+    block_size: float,
+) -> pd.Series:
+    """
+    基于空间坐标构建较粗粒度 block ID，用于减弱相邻 spot 的伪重复问题。
+
+    设计思想：
+      - 将连续空间坐标按固定网格宽度离散化；
+      - 同一 block 内的 spot 在 DE 检验时先聚合为 block-level 均值；
+      - 若存在 sample 列，block ID 会附带 sample 前缀，避免联合分析时跨切片聚合。
+    """
+    if block_size <= 0:
+        raise ValueError(f"block_size must be positive, got {block_size}")
+    if "spatial_x" not in df.columns or "spatial_y" not in df.columns:
+        raise KeyError("spatial_x/spatial_y not found; cannot construct spatial blocks.")
+
+    gx = np.floor(df["spatial_x"].to_numpy(dtype=float) / block_size).astype(int)
+    gy = np.floor(df["spatial_y"].to_numpy(dtype=float) / block_size).astype(int)
+    if "sample" in df.columns:
+        prefix = df["sample"].astype(str).to_numpy()
+        block_ids = [f"{sample}:{x}_{y}" for sample, x, y in zip(prefix, gx, gy)]
+    else:
+        block_ids = [f"{x}_{y}" for x, y in zip(gx, gy)]
+    return pd.Series(block_ids, index=df.index, name="spatial_block")
+
+
+def _aggregate_expr_by_block(
+    expr: pd.DataFrame,
+    high: pd.Series,
+    block_ids: pd.Series,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """
+    将 spot 级表达先按空间 block 聚合，再分别返回 niche_high / niche_low 的 block 级矩阵。
+    """
+    high = high.astype(bool).reindex(expr.index).fillna(False)
+    block_ids = block_ids.reindex(expr.index)
+    valid = block_ids.notna()
+    if not valid.all():
+        expr = expr.loc[valid]
+        high = high.loc[valid]
+        block_ids = block_ids.loc[valid]
+
+    high_expr = expr.loc[high]
+    low_expr = expr.loc[~high]
+    high_blocks = block_ids.loc[high]
+    low_blocks = block_ids.loc[~high]
+
+    if high_expr.empty or low_expr.empty:
+        return pd.DataFrame(columns=expr.columns), pd.DataFrame(columns=expr.columns)
+
+    high_block_expr = high_expr.groupby(high_blocks).mean()
+    low_block_expr = low_expr.groupby(low_blocks).mean()
+    return high_block_expr, low_block_expr
 
 
 def _module_score(
@@ -804,7 +848,7 @@ def _sensitivity_analysis(
     fibroblast_col: str,
     n_neighbors_list: tuple[int, ...] = (10, 15, 20),
     radius_multiplier_list: tuple[float, ...] = (1.0, 1.25, 1.5),
-    niche_high_quantile: float = 0.85,
+    niche_high_quantile: float = 0.80,
     ref_k: int = 15,
     sample_labels: np.ndarray | None = None,
 ) -> pd.DataFrame:
@@ -990,20 +1034,20 @@ def _spatial_scatter(
     分类变量模式（categorical=True）：固定颜色 + 图例。
 
     【配色说明 —— 仿论文 HCC single-cell ecosystem 风格】
-    - 连续值默认使用 "paper_ybp"（Yellow-Black-Purple 渐变），
+    - 连续值默认使用 "paper_ybp"（深蓝-青绿-亮黄渐变），
       与参考论文图表（Expression 热图）颜色风格一致：
-        低值 → 深紫色 (#3a0063)
-        中值 → 纯黑色 (#000000)
-        高值 → 亮黄色 (#f5e642)
+        低值 → 深蓝色 (#253494)
+        中值 → 青绿色 (#1FA187)
+        高值 → 亮黄色 (#FDE725)
       此配色对视觉有强对比度，高表达区域突出，适合空间分布图。
-    - 分类变量使用高饱和度固定色板（与论文 tSNE 图风格一致）。
+    - 分类变量使用高饱和度固定色板。
     """
     from matplotlib.colors import LinearSegmentedColormap as _LSC
 
-    # 自定义 Yellow-Black-Purple 颜色映射（仿论文配色）
+    # 统一连续信号颜色映射
     _PAPER_YBP = _LSC.from_list(
         "paper_ybp",
-        ["#3a0063", "#000000", "#f5e642"],   # purple → black → yellow
+        ["#253494", "#1FA187", "#FDE725"],
         N=256,
     )
 
@@ -1145,7 +1189,7 @@ def _plot_correlation(df: pd.DataFrame, columns: list[str], path: Path) -> None:
     绘制指定列之间的 Pearson 相关系数热图。
 
     【配色说明】
-    使用 Yellow-Black-Purple 渐变色（paper_ybp）与论文风格一致；
+    使用深蓝-青绿-亮黄渐变色（paper_ybp）与论文风格一致；
     正相关（高值）→ 亮黄色，负相关（低值）→ 深紫色，零相关 → 黑色。
 
     用于探索细胞类型比例与 niche 评分之间的共定位关系。
@@ -1164,13 +1208,13 @@ def _plot_hep_treg(df: pd.DataFrame, path: Path) -> None:
     """
     绘制 Hepatocyte 比例 vs Treg 比例散点图，颜色编码 niche 评分。
 
-    【配色说明】使用 Yellow-Black-Purple 渐变色（paper_ybp）与论文风格一致。
+    【配色说明】使用深蓝-青绿-亮黄渐变色（paper_ybp）与论文风格一致。
     虚线标注 0.75 分位数，划分四象限，直观展示肝细胞-Treg 共定位关系。
     """
     from matplotlib.colors import LinearSegmentedColormap as _LSC
     _PAPER_YBP = _LSC.from_list(
         "paper_ybp",
-        ["#3a0063", "#000000", "#f5e642"],
+        ["#253494", "#1FA187", "#FDE725"],
         N=256,
     )
     fig, ax = plt.subplots(figsize=(5.5, 5))
@@ -1314,9 +1358,16 @@ def _plot_lr_communication(
         figsize=(10, max(4, n_rows * 0.65 + 1.5)),
         gridspec_kw={"width_ratios": [3, 1]},
     )
+    from matplotlib.colors import LinearSegmentedColormap as _LSC
+    _PAPER_YBP = _LSC.from_list(
+        "paper_ybp",
+        ["#253494", "#1FA187", "#FDE725"],
+        N=256,
+    )
+
     # 左图：信号强度热图
     sns.heatmap(
-        hm_norm, cmap="YlOrRd", vmin=0, vmax=1,
+        hm_norm, cmap=_PAPER_YBP, vmin=0, vmax=1,
         annot=hm_data.round(4), fmt="g",
         linewidths=0.5, ax=axes[0],
     )
@@ -1500,6 +1551,8 @@ def _rank_niche_genes(
     adata: ad.AnnData,
     labels: pd.Series,
     top_n: int,
+    test_mode: str = "block_mwu",
+    block_ids: pd.Series | None = None,
 ) -> pd.DataFrame:
     """
     对 niche 高分 spot 进行多维度差异基因分析，筛选特征性高表达基因。
@@ -1594,18 +1647,47 @@ def _rank_niche_genes(
     # ── Layer 1：log2FC + Wilcoxon + FDR ──────────────────────────────────────
     log2fc = np.log2((mean_high + 1.0) / (mean_low + 1.0))
     pvalues = np.full(len(expr.columns), 1.0)
+    block_high_n = block_low_n = None
+    test_high_expr = high_expr
+    test_low_expr = low_expr
+
+    if test_mode == "block_mwu":
+        if block_ids is None:
+            raise ValueError("block_mwu mode requires block_ids.")
+        test_high_expr, test_low_expr = _aggregate_expr_by_block(expr, high, block_ids)
+        block_high_n = len(test_high_expr)
+        block_low_n = len(test_low_expr)
+        logging.info(
+            "DE test mode: block_mwu | block counts: niche_high=%d, niche_low=%d",
+            block_high_n,
+            block_low_n,
+        )
+        if block_high_n < 3 or block_low_n < 3:
+            logging.warning(
+                "Too few spatial blocks for block_mwu (high=%d, low=%d); fallback to spot_mwu.",
+                block_high_n,
+                block_low_n,
+            )
+            test_mode = "spot_mwu"
+            test_high_expr = high_expr
+            test_low_expr = low_expr
+    elif test_mode != "spot_mwu":
+        raise ValueError(f"Unknown test_mode: {test_mode}")
 
     # 候选基因：log2FC > 0.1 OR delta_frac > 0.05（兼顾高表达基因和高富集基因）
     candidate_mask = (log2fc.to_numpy() > 0.1) | (delta_frac.to_numpy() > 0.05)
     candidate_genes = expr.columns[candidate_mask].tolist()
     logging.info(
-        "Running Wilcoxon test on %d candidate genes (log2FC>0.1 OR delta_frac>0.05)...",
+        "Running %s test on %d candidate genes (log2FC>0.1 OR delta_frac>0.05)...",
+        test_mode,
         len(candidate_genes),
     )
     for i, gene in enumerate(candidate_genes):
         gene_idx = list(expr.columns).index(gene)
-        h_vals = high_expr[gene].to_numpy()
-        l_vals = low_expr[gene].to_numpy()
+        h_vals = test_high_expr[gene].to_numpy()
+        l_vals = test_low_expr[gene].to_numpy()
+        if len(h_vals) < 3 or len(l_vals) < 3:
+            continue
         if h_vals.std() == 0 and l_vals.std() == 0:
             continue
         try:
@@ -1676,8 +1758,8 @@ def _rank_niche_genes(
                 logging.debug("Prior gene set [%s]: %s not found in data; skipped.", group_name, gene)
                 continue
 
-            h_vals = high_expr[actual_gene].to_numpy()
-            l_vals = low_expr[actual_gene].to_numpy()
+            h_vals = test_high_expr[actual_gene].to_numpy()
+            l_vals = test_low_expr[actual_gene].to_numpy()
             # AUC（用 Mann-Whitney U 统计量计算）
             try:
                 stat, p = scipy_stats.mannwhitneyu(h_vals, l_vals, alternative="greater")
@@ -1773,6 +1855,10 @@ def _rank_niche_genes(
 
     result.attrs["prior_auc_df"] = prior_df
     result.attrs["gini_df"] = gini_df
+    result.attrs["de_test_mode"] = test_mode
+    if block_high_n is not None and block_low_n is not None:
+        result.attrs["niche_high_blocks"] = int(block_high_n)
+        result.attrs["niche_low_blocks"] = int(block_low_n)
     return result
 
 
@@ -2112,375 +2198,6 @@ def _plot_niche_comparison(
     logging.info("Niche comparison plot saved: %s", path)
 
 
-# ============================================================
-# 新增：参数扫描（k × niche_high_quantile 网格搜索）
-# ============================================================
-
-def _param_scan_deg_stability(
-    adata: ad.AnnData,
-    proportions: pd.DataFrame,
-    coords: np.ndarray,
-    gene_score: pd.Series,
-    treg_col: str,
-    myeloid_col: str,
-    fibroblast_col: str,
-    n_neighbors: int = 15,
-    k_list: tuple[int, ...] = (8, 10, 15, 20, 25),
-    quantile_list: tuple[float, ...] = (0.70, 0.75, 0.80, 0.85),
-    top_n: int = 50,
-    seed: int = 1234,
-    sample_labels: np.ndarray | None = None,
-) -> pd.DataFrame:
-    """
-    对 kNN 邻居数（k）× niche_high 分位数阈值进行网格扫描，
-    以 DEG 稳定性（显著基因数量 + 相邻参数组合 Jaccard 相似度）
-    作为目标函数，辅助选择最优参数组合。
-
-    【为什么改为 k × quantile，而不是 resolution × quantile？】
-    原来的 resolution × quantile 扫描存在根本性缺陷：
-      - niche_score 的计算（Step 9）基于邻域组成向量的 Z-score 加总；
-      - 邻域组成向量由 k-NN 邻居数决定，k 不同则每个 spot 的邻域大小不同；
-      - Leiden resolution 仅决定聚类粒度（n_clusters），不影响 niche_score 数值；
-      - 因此，固定 k 时改变 resolution 对 DEG 结果没有任何影响，热图列完全相同。
-
-    k 才是真正影响 niche 评分的参数：
-      - 小 k（如 k=8）：邻域小，捕捉微观局灶性免疫聚集；
-      - 大 k（如 k=25）：邻域大，捕捉宏观区域性免疫浸润模式；
-      - 不同 k 下 niche_score 向量不同，DEG 结果自然不同，热图有意义差异。
-
-    扫描逻辑（k × quantile 共 5×4 = 20 种参数组合）：
-      1. 对每种 k，重新构建 kNN 邻接图，重新计算邻域组成向量和 niche_score；
-      2. 对每种 quantile 阈值切割 niche_high；
-      3. 对 niche_high vs niche_low 做 Wilcoxon 检验，记录：
-           - n_sig_deg      : FDR < 0.05 且 log2FC > 0.5 的基因数量
-           - mean_log2fc    : Top-N 基因的平均 log2FC
-           - top_genes_str  : 前 20 个基因名（用于跨参数 Jaccard 比较）
-      4. 对相邻参数组合（k ±1档 或 quantile ±0.05），
-         计算 Top-N 基因列表之间的 Jaccard 相似度（稳健性指标）
-
-    【热图解读】
-      - 横轴：niche_high_quantile（阈值越高 = niche_high 越少 = 越严格）
-      - 纵轴：k（邻居数越大 = 邻域越大 = 捕捉宏观模式）
-      - 颜色：n_sig_deg 越深 = 该参数组合下可重复 DEG 越多
-      - 选参标准：颜色最深且处于"高原"区域（与相邻参数结果相近）的组合即为推荐
-
-    参数
-    ----
-    adata          : AnnData 数据对象
-    proportions    : 细胞类型比例矩阵
-    coords         : 空间坐标
-    gene_score     : 免疫抑制基因模块评分
-    treg_col       : Treg 比例列名
-    myeloid_col    : Myeloid 比例列名
-    fibroblast_col : Fibroblast 比例列名
-    n_neighbors    : 主流程使用的 kNN 邻居数（参考值，出现在热图中对应格子）
-    k_list         : kNN 邻居数扫描列表（主轴参数，真正影响 niche_score）
-    quantile_list  : niche_high 分位数阈值扫描列表
-    top_n          : 用于计算 Jaccard 的 Top-N 基因数
-    seed           : 随机数种子（供 Leiden 使用，本步骤不重新运行 Leiden）
-
-    返回
-    ----
-    pd.DataFrame，每行为一种参数组合的结果：
-      k / quantile / n_sig_deg / mean_log2fc_topN / top_genes_str
-    """
-    import itertools
-
-    gs = gene_score.reindex(proportions.index).fillna(0.0)
-    expr = _expression_frame(adata)
-    expr_columns = expr.columns.tolist()
-    gene_to_idx = {gene: idx for idx, gene in enumerate(expr_columns)}
-    rows = []
-
-    for k, quantile in itertools.product(k_list, quantile_list):
-        try:
-            # 1. 重新构建 k 近邻图（k 变化 → 邻域大小变化 → niche_score 真正不同）
-            if sample_labels is not None:
-                neighbors_k = _build_knn_neighbors_per_sample(coords, sample_labels, k=k)
-            else:
-                neighbors_k = _build_knn_neighbors(coords, k=k)
-
-            # 2. 用新的邻域大小重新计算邻域组成向量和 niche_score
-            neighborhood_comp = _compute_neighborhood_composition(proportions, neighbors_k)
-            niche_score = (
-                _zscore(neighborhood_comp[treg_col])
-                + _zscore(neighborhood_comp[myeloid_col])
-                + _zscore(neighborhood_comp[fibroblast_col])
-                + _zscore(gs)
-            )
-
-            # 3. 切割 niche_high（quantile 变化 → 高分组大小变化）
-            thr = float(niche_score.quantile(quantile))
-            niche_high = niche_score >= thr
-
-            if int(niche_high.sum()) < 3 or int((~niche_high).sum()) < 3:
-                logging.debug(
-                    "Param scan [k=%d, q=%.2f]: skipped (too few spots).", k, quantile
-                )
-                continue
-
-            # 4. Wilcoxon 检验（快速版：仅对 log2FC > 0.3 的基因检验）
-            # niche_score 的索引来自 proportions，expr 的索引来自 adata.obs_names，
-            # 两者可能不完全一致，必须对齐后再用布尔索引，否则触发
-            # "Unalignable boolean Series" 错误。
-            niche_high_aligned = niche_high.reindex(expr.index).fillna(False).astype(bool)
-            high_expr = expr.loc[niche_high_aligned]
-            low_expr  = expr.loc[~niche_high_aligned]
-            mean_h = high_expr.mean()
-            mean_l = low_expr.mean()
-            lfc = np.log2((mean_h + 1.0) / (mean_l + 1.0))
-
-            cands = expr.columns[lfc.to_numpy() > 0.3].tolist()
-            pvals = np.ones(len(expr.columns))
-            for gene in cands:
-                gidx = gene_to_idx[gene]
-                try:
-                    _, p = scipy_stats.mannwhitneyu(
-                        high_expr[gene].to_numpy(), low_expr[gene].to_numpy(),
-                        alternative="greater",
-                    )
-                    pvals[gidx] = p
-                except Exception:
-                    pass
-            _, fdr, _, _ = multipletests(pvals, method="fdr_bh")
-            sig_mask = (fdr < 0.05) & (lfc.to_numpy() > 0.5)
-            n_sig = int(sig_mask.sum())
-
-            # Top-N 基因（按 log2FC 降序）
-            sig_df = pd.DataFrame({
-                "gene":    expr_columns,
-                "log2_fc": lfc.to_numpy(),
-                "fdr":     fdr,
-            })
-            top_genes = (
-                sig_df[sig_df["fdr"] < 0.05]
-                .sort_values("log2_fc", ascending=False)
-                .head(top_n)["gene"]
-                .tolist()
-            )
-            if not top_genes:
-                top_genes = sig_df.sort_values("log2_fc", ascending=False).head(top_n)["gene"].tolist()
-
-            mean_lfc_top = float(lfc.reindex(top_genes).dropna().mean()) if top_genes else 0.0
-
-            rows.append({
-                "k":               k,
-                "quantile":        quantile,
-                "n_sig_deg":       n_sig,
-                "mean_log2fc_topN": round(mean_lfc_top, 4),
-                "top_genes_str":   ";".join(top_genes[:20]),
-            })
-            logging.info(
-                "Param scan [k=%d, q=%.2f]: n_sig_deg=%d, mean_log2fc_top%d=%.3f",
-                k, quantile, n_sig, top_n, mean_lfc_top,
-            )
-        except Exception as exc:
-            logging.warning(
-                "Param scan [k=%d, q=%.2f] failed: %s", k, quantile, exc
-            )
-
-    return pd.DataFrame(rows)
-
-
-def _plot_param_scan_heatmap(
-    param_scan_df: pd.DataFrame,
-    path: Path,
-) -> None:
-    """
-    绘制参数扫描热图：横轴为 niche_high_quantile，纵轴为 Leiden resolution，
-    颜色编码为显著 DEG 数量（n_sig_deg）。
-
-    热图用于可视化最优参数区域：颜色最深（DEG 数量最多）且处于"高原"区域
-    （与相邻参数结果相近）的参数组合即为推荐选择。
-
-    同时在每个格子中标注 n_sig_deg 数值，便于直接读取。
-
-    参数
-    ----
-    param_scan_df : _param_scan_deg_stability 返回的 DataFrame
-    path          : 输出图片路径
-    """
-    if param_scan_df.empty or "n_sig_deg" not in param_scan_df.columns:
-        logging.warning("Empty param scan DataFrame; skipping heatmap.")
-        return
-
-    # 透视表：行=k（kNN邻居数），列=quantile，值=n_sig_deg
-    pivot = param_scan_df.pivot(
-        index="k", columns="quantile", values="n_sig_deg"
-    )
-
-    fig, ax = plt.subplots(figsize=(7, 5))
-    sns.heatmap(
-        pivot,
-        cmap="YlOrRd",
-        annot=True, fmt="d",
-        linewidths=0.5,
-        ax=ax,
-        cbar_kws={"label": "Number of significant DEGs\n(FDR<0.05, log2FC>0.5)"},
-    )
-    ax.set_xlabel("niche_high quantile threshold")
-    ax.set_ylabel("kNN neighbors (k)")
-    ax.set_title(
-        "Parameter Scan: DEG Stability Heatmap\n"
-        "(k × quantile; darker = more stable DEGs; optimal = darkest plateau)",
-        fontsize=10,
-    )
-    fig.tight_layout()
-    fig.savefig(path, dpi=180, bbox_inches="tight")
-    plt.close(fig)
-    logging.info("Parameter scan heatmap saved: %s", path)
-
-
-# ============================================================
-# 主流程
-# ============================================================
-
-def main() -> int:
-    """
-    主函数：执行完整的空间免疫抑制生态位分析流程。
-
-    返回 0 表示正常完成（供 Shell 脚本通过 $? 检查）。
-    """
-    # ── Step 1: 初始化 ──────────────────────────────────────────────────────────
-    _setup_logging()
-    args = _parse_args()
-    np.random.seed(args.seed)
-    args.out_dir.mkdir(parents=True, exist_ok=True)
-    plot_dir = args.out_dir / "plots"
-    plot_dir.mkdir(parents=True, exist_ok=True)
-
-    # ── Step 2: 数据加载与校验 ───────────────────────────────────────────────────
-    logging.info("Loading spatial AnnData: %s", args.adata)
-    adata = ad.read_h5ad(args.adata)
-    if "spatial" not in adata.obsm:
-        raise KeyError("adata.obsm['spatial'] is required for spatial niche analysis.")
-
-    abundance = _get_abundance(adata, args.abundance_key)
-    required_cols = [
-        args.hepatocyte_col, args.treg_col,
-        args.myeloid_col, args.fibroblast_col, args.tnk_col,
-    ]
-    missing_cols = [c for c in required_cols if c not in abundance.columns]
-    if missing_cols:
-        raise KeyError(
-            f"Missing cell abundance columns: {missing_cols}; "
-            f"available: {list(abundance.columns)}"
-        )
-
-    # ── Step 3: 归一化细胞丰度为比例 ────────────────────────────────────────────
-    proportions = (
-        abundance.div(abundance.sum(axis=1).replace(0, np.nan), axis=0)
-        .fillna(0.0)
-    )
-    coords = np.asarray(adata.obsm["spatial"])
-
-    # ── Step 4: 构建空间半径邻域（用于计算邻域均值特征） ─────────────────────────
-    per_sample = args.per_sample_neighbors
-    sample_labels: np.ndarray | None = None
-    if per_sample:
-        if "sample" not in adata.obs.columns:
-            raise KeyError(
-                "--per-sample-neighbors requires adata.obs['sample'] column "
-                "to identify slice origin. "
-                "Please run run_preprocessing.py in joint mode first."
-            )
-        sample_labels = adata.obs["sample"].values
-        logging.info(
-            "Per-sample neighbor mode enabled: %d samples (%s)",
-            len(np.unique(sample_labels)),
-            ", ".join(np.unique(sample_labels)),
-        )
-        neighbors_radius, radius = _spatial_neighbors_per_sample(
-            coords, sample_labels, args.neighbor_radius_multiplier,
-        )
-    else:
-        neighbors_radius, radius = _spatial_neighbors(coords, args.neighbor_radius_multiplier)
-    logging.info(
-        "Spatial neighbor radius (multiplier=%.2f): %.3f",
-        args.neighbor_radius_multiplier, radius,
-    )
-
-    # ── Step 5: 计算免疫抑制基因模块评分 ────────────────────────────────────────
-    gene_score, marker_genes = _module_score(adata, IMMUNOSUPPRESSIVE_GENES)
-    logging.info(
-        "Immunosuppressive marker genes used (%d): %s",
-        len(marker_genes),
-        ", ".join(marker_genes) if marker_genes else "none",
-    )
-
-    # ── Step 6: 邻域组成聚类（Cellular Neighborhood Discovery）────────────────
-    logging.info(
-        "Step 6: Building kNN neighbors (k=%d) for neighborhood composition clustering...",
-        args.n_neighbors,
-    )
-    if per_sample:
-        neighbors_knn = _build_knn_neighbors_per_sample(
-            coords, sample_labels, k=args.n_neighbors,
-        )
-    else:
-        neighbors_knn = _build_knn_neighbors(coords, k=args.n_neighbors)
-    neighborhood_comp = _compute_neighborhood_composition(proportions, neighbors_knn)
-
-    logging.info(
-        "Step 6: Running Leiden clustering on neighborhood composition "
-        "(resolution=%.2f, seed=%d)...",
-        args.leiden_resolution, args.seed,
-    )
-    nc_labels = _leiden_cluster_neighborhood(
-        neighborhood_comp,
-        n_neighbors=args.n_neighbors,
-        resolution=args.leiden_resolution,
-        seed=args.seed,
-    )
-    n_clusters = len(nc_labels.unique())
-    logging.info("Leiden clustering identified %d neighborhood clusters.", n_clusters)
-
-    # ── Step 7: 功能评分注释 niche cluster ──────────────────────────────────────
-    logging.info("Step 7: Annotating neighborhood clusters with functional scores...")
-    tmp_df = proportions.copy()
-    tmp_df["immunosuppressive_gene_score"] = (
-        gene_score.reindex(tmp_df.index).fillna(0.0).to_numpy()
-    )
-    tmp_df["neighborhood_cluster"] = nc_labels.reindex(tmp_df.index).to_numpy()
-
-    niche_semantic, cluster_stats = _annotate_neighborhood_clusters(
-        df=tmp_df,
-        cluster_col="neighborhood_cluster",
-        treg_col=args.treg_col,
-        myeloid_col=args.myeloid_col,
-        fibroblast_col=args.fibroblast_col,
-    )
-    cluster_stats.to_csv(args.out_dir / "neighborhood_cluster_stats.csv")
-
-    # ── Step 8: 构建综合分析 DataFrame ──────────────────────────────────────────
-    df = proportions.copy()
-    df.insert(0, "spot_id", adata.obs_names)
-    df["spatial_x"]   = coords[:, 0]
-    df["spatial_y"]   = coords[:, 1]
-    df["neighbor_radius"] = radius
-    df["immunosuppressive_gene_score"] = gene_score.reindex(df.index).to_numpy()
-    df["neighborhood_cluster"]   = nc_labels.reindex(df.index).to_numpy()
-    df["niche_semantic_label"]   = niche_semantic.reindex(df.index).to_numpy()
-
-    # 高肝细胞区域标志（辅助注释，不用于 niche 发现主体）
-    hep = df[args.hepatocyte_col]
-    hep_thr = float(hep.quantile(args.hep_high_quantile))
-    df["hep_high"] = hep >= hep_thr
-    df["distance_to_hep_high"] = _distance_to_mask(coords, df["hep_high"].to_numpy())
-
-    # 各细胞类型的空间邻域均值
-    for col in [args.hepatocyte_col, "Treg", args.tnk_col,
-                args.myeloid_col, args.fibroblast_col]:
-        out_col = col.replace("/", "_")
-        df[f"neighbor_{out_col}"] = _neighbor_mean(df[col], neighbors_radius)
-
-    # 是否有高肝细胞邻居（用于 tumor_edge 标注）
-    hep_high_arr = df["hep_high"].to_numpy()
-    df["has_hep_high_neighbor"] = [
-        bool(len(idx) and hep_high_arr[idx].any())
-        for idx in neighbors_radius
-    ]
-
     # ── Step 9: 多层次评分计算 ──────────────────────────────────────────────────
     # Treg 样评分：Treg 比例 + 免疫抑制基因评分（Z-score 加总）
     df["Treg_like_score"] = (
@@ -2553,6 +2270,9 @@ def main() -> int:
             ("niche_high_quantile",   args.niche_high_quantile),
             ("niche_high_threshold",  niche_thr),
             ("n_niche_high",          int(df["niche_high"].sum())),
+            ("de_test_mode",          args.de_test_mode),
+            ("de_block_size_multiplier", args.de_block_size_multiplier),
+            ("de_block_size",         float(radius) * float(args.de_block_size_multiplier)),
             ("marker_genes_used",     ",".join(marker_genes)),
         ],
         columns=["parameter", "value"],
@@ -2570,12 +2290,12 @@ def main() -> int:
                      plot_dir / "spatial_myeloid.png", "Myeloid proportion")
     _spatial_scatter(df, args.fibroblast_col,
                      plot_dir / "spatial_fibroblast.png", "Fibroblast proportion")
-    # 免疫抑制 niche 综合评分空间分布图（magma 配色）
+    # 免疫抑制 niche 综合评分空间分布图（统一 paper_ybp 配色）
     _spatial_scatter(
         df, "immunosuppressive_niche_score",
         plot_dir / "spatial_immunosuppressive_niche_score.png",
         "Immunosuppressive niche score",
-        cmap="magma",
+        cmap="paper_ybp",
     )
     # 邻域组成聚类空间分布图
     _plot_neighborhood_clusters(df, plot_dir / "spatial_neighborhood_clusters.png")
@@ -2615,8 +2335,7 @@ def main() -> int:
     _plot_sensitivity(sensitivity_df, plot_dir / "sensitivity_niche_stability.png")
 
     # ── 新增图1：niche_high 分位数阈值切割的 spot 空间二值分布图 ─────────────────
-    # 颜色编码：红色 = 评分高于 niche_high_quantile（如 80 百分位）的 spot
-    #           灰色 = 其余 spot
+    # 颜色编码：统一 paper_ybp 色板显示 niche_high 阈值分组
     # 与 spatial_niche_semantic_labels.png（Leiden 聚类方法）对比，
     # 展示"评分法"与"聚类法"在空间上的差异（重叠/分歧）。
     logging.info("Step 13+: Generating niche_high score-based binary map...")
@@ -2624,7 +2343,7 @@ def main() -> int:
         df, "niche_high",
         plot_dir / "spatial_niche_high_score_spots.png",
         f"Niche-High Spots (score > {int(args.niche_high_quantile * 100)}th percentile)",
-        cmap="RdGy_r",
+        cmap="paper_ybp",
     )
 
     # ── 新增图2：聚类方法 vs 评分方法并排对比图 ──────────────────────────────────
@@ -2640,7 +2359,21 @@ def main() -> int:
 
     # ── Step 14: 特征基因提取（升级版） ─────────────────────────────────────────
     logging.info("Step 14: Extracting niche signature genes (with Wilcoxon + FDR + Gini)...")
-    ranked = _rank_niche_genes(adata, df["niche_high"], args.top_niche_genes)
+    block_size = float(radius) * float(args.de_block_size_multiplier)
+    block_ids = _build_spatial_block_ids(df, block_size)
+    logging.info(
+        "DE block configuration | mode=%s | block_size=%.3f | n_blocks=%d",
+        args.de_test_mode,
+        block_size,
+        block_ids.nunique(),
+    )
+    ranked = _rank_niche_genes(
+        adata,
+        df["niche_high"],
+        args.top_niche_genes,
+        test_mode=args.de_test_mode,
+        block_ids=block_ids,
+    )
 
     # 保存 Layer 1：主签名基因（Wilcoxon + FDR）
     ranked.to_csv(
@@ -2704,12 +2437,33 @@ def main() -> int:
         pvals_all = np.full(len(expr_full.columns), 1.0)
         cand_mask = (lfc_all.to_numpy() > 0.05) | (delta_frac_all.to_numpy() > 0.03)
         cands = expr_full.columns[cand_mask].tolist()
+
+        test_high_full = expr_full.loc[high_full]
+        test_low_full = expr_full.loc[~high_full]
+        if args.de_test_mode == "block_mwu":
+            test_high_full, test_low_full = _aggregate_expr_by_block(expr_full, high_full, block_ids)
+            logging.info(
+                "Volcano DE mode: block_mwu | block counts: niche_high=%d, niche_low=%d",
+                len(test_high_full),
+                len(test_low_full),
+            )
+            if len(test_high_full) < 3 or len(test_low_full) < 3:
+                logging.warning(
+                    "Too few spatial blocks for volcano block_mwu; fallback to spot_mwu."
+                )
+                test_high_full = expr_full.loc[high_full]
+                test_low_full = expr_full.loc[~high_full]
+
         for gene in cands:
             gidx = list(expr_full.columns).index(gene)
             try:
+                h_vals = test_high_full[gene].to_numpy()
+                l_vals = test_low_full[gene].to_numpy()
+                if len(h_vals) < 3 or len(l_vals) < 3:
+                    continue
                 _, p = _mwu(
-                    expr_full.loc[high_full, gene].to_numpy(),
-                    expr_full.loc[~high_full, gene].to_numpy(),
+                    h_vals,
+                    l_vals,
                     alternative="greater",
                 )
                 pvals_all[gidx] = p
@@ -2738,35 +2492,6 @@ def main() -> int:
         )
     except Exception as exc:
         logging.warning("Volcano/fraction plot failed: %s", exc)
-
-    # ── Step 15: 参数扫描（resolution × niche_high_quantile 网格搜索）────────────
-    logging.info("Step 15: Running parameter scan (k × quantile grid)...")
-    try:
-        param_scan_df = _param_scan_deg_stability(
-            adata=adata,
-            proportions=proportions,
-            coords=coords,
-            gene_score=gene_score,
-            treg_col=args.treg_col,
-            myeloid_col=args.myeloid_col,
-            fibroblast_col=args.fibroblast_col,
-            n_neighbors=args.n_neighbors,
-            k_list=(8, 10, 15, 20, 25),
-            quantile_list=(0.80, 0.85, 0.9, 0.95), # TODO：尝试不同取值
-            sample_labels=sample_labels if per_sample else None,
-            top_n=args.top_niche_genes,
-            seed=args.seed,
-        )
-        param_scan_df.to_csv(
-            args.out_dir / "param_scan_deg_stability.csv", index=False
-        )
-        _plot_param_scan_heatmap(
-            param_scan_df,
-            plot_dir / "param_scan_deg_stability_heatmap.png",
-        )
-        logging.info("Parameter scan completed. Results saved.")
-    except Exception as exc:
-        logging.warning("Parameter scan failed: %s", exc)
 
     logging.info("Niche signature genes saved: %s", sig_path)
     logging.info("TCGA-ready signature also saved: %s", args.signature_out)

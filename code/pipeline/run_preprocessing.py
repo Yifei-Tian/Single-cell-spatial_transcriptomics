@@ -43,36 +43,12 @@
     需通过 adata.obs["sample"] 识别切片来源，并在建立 kNN 空间邻域时限制在
     同一切片内（通过 --per-sample-neighbors 参数激活），避免跨切片物理邻居错误。
 
-【调用入口】
-    # HCC4R 主分析（推荐，通过入口脚本调用）：
-    python code/run_hcc4r.py                 # Step 1 + Step 2 + 可选 Step 3
-    python code/run_hcc4r.py --step1-only    # 仅 Step 1
-
-    # 直接调用本脚本（高级用法）：
-    python code/pipeline/run_preprocessing.py \
-        --path-scrna  data/scRNA_reference.h5ad \
-        --path-sample1 data/HCC4R \
-        --sample1-name HCC4R \
-        --output-dir   results/HCC4R
-
 【输入文件】
-    data/scRNA_reference.h5ad    - scRNA-seq 参考数据（utils/pre.py 生成）
-    data/HCC4R/                  - HCC4R Visium Space Ranger 输出目录（主分析）
-    data/CHC20_Visium/           - CHC20 Visium Space Ranger 输出目录（验证，可选）
+    data/scRNA_reference.h5ad    - scRNA-seq 参考数据（pre.py 生成）
+    data/CHC20_Visium/           - CHC20 Visium Space Ranger 输出目录
+    data/HCC4R/                  - HCC4R Visium Space Ranger 输出目录
 
-【输出文件（单切片模式，以 HCC4R 为例，保存于 results/HCC4R/）】
-    adata_vis_post.h5ad                   - HCC4R 反卷积后的空间 AnnData（Step 2 主输入）
-    adata_sc_post.h5ad                    - scRNA-seq 参考数据（含后验签名）
-    spot_cell_proportion_HCC4R.csv        - HCC4R spot 细胞类型比例表
-    shared_genes_HCC4R.txt               - scRNA × Visium 共享基因列表
-    regression_training_history_HCC4R.png - RegressionModel 训练曲线
-    t_cell_dotplot_horizontal.png         - Treg 标志基因横版气泡图（论文 Figure 1D）
-    scrna_tsne_celltype.png               - scRNA-seq tSNE 细胞类型图（论文 Figure 1B）
-    scrna_celltype_marker_heatmap.png     - 细胞类型 Marker 热图（论文 Figure 1C）
-    cross_slice_comparison/               - 多切片细胞组成对比图（有验证切片时生成）
-    run_preprocessing.log                 - 全流程运行日志
-
-【输出文件（联合分析模式，joint_mode=True，保存于 results/joint_HCC4R_CHC20/）】
+【输出文件（联合分析模式，保存于 results/joint_HCC4R_CHC20/）】
     adata_vis_post_HCC4R.h5ad            - HCC4R 单独反卷积结果
     adata_vis_post_CHC20.h5ad            - CHC20 单独反卷积结果
     adata_vis_post_joint.h5ad            - 两切片合并结果（含 obs["sample"] 列）
@@ -84,13 +60,12 @@
     regression_training_history_joint.png - 统一 RegressionModel 训练曲线
     t_cell_dotplot_horizontal.png        - Treg 标志基因横版气泡图
     cross_slice_comparison/              - 两切片细胞组成对比图
+    run_preprocessing.log                - 全流程运行日志
 
 【依赖关系】
-    上游：utils/pre.py（生成 .h5ad 数据文件）
-    下游：pipeline/run_spatial_niche_analysis.py
-          （读取 adata_vis_post.h5ad 进行 Niche 分析；通过 run_hcc4r.py 调用）
-          pipeline/run_paper_figures.py
-          （读取 adata_vis_post.h5ad + adata_sc_post.h5ad 生成论文图表）
+    上游：pre.py（生成 .h5ad 数据文件）
+    下游：run_spatial_niche_analysis.py（读取 adata_vis_post.h5ad 或
+          adata_vis_post_joint.h5ad 进行 Niche 分析）
 
 【参考文献】
     - Kleshchevnikov et al., Nature Biotechnology, 2022 (Cell2location)
@@ -205,153 +180,13 @@ def plot_treg_dotplot_horizontal(
     ax_dict = dp.get_axes()
     fig = list(ax_dict.values())[0].get_figure()
     fig.suptitle(
-        "Treg Marker Gene Expression Across T/NK Subclusters\n"
-        "(Horizontal Dot Plot)",
+        "Treg Marker Gene Expression Across T/NK Subclusters",
         fontsize=10, y=1.01,
     )
     fig.savefig(save_path, dpi=dpi, bbox_inches="tight")
     plt.close(fig)
     LOGGER.info("横版 Treg 气泡图已保存: %s", save_path)
 
-
-# ============================================================
-# 辅助函数：tSNE 细胞类型图（仿论文 Figure C 风格）
-# ============================================================
-
-def plot_scrna_tsne_celltype(
-    adata_sc,
-    celltype_col: str,
-    cluster_col: str,
-    save_path: Path,
-    dpi: int = 180,
-) -> None:
-    """
-    绘制 scRNA-seq tSNE 细胞类型分布图，风格仿照参考论文 Figure C（1.png）。
-
-    图表特征：
-      - 每个细胞在 tSNE 坐标系中绘制为一个点（s=6，半透明）
-      - 每种细胞类型使用高饱和度固定颜色，与论文 tSNE 图配色风格一致
-      - 每个细胞类型在图中标注聚类编号和类型名称
-      - 右侧图例展示颜色-类型对应关系
-      - 坐标轴标注 tSNE 1 / tSNE 2，带箭头指示方向
-
-    【配色说明】
-    参照论文图 C（tSNE 细胞类型聚类图）的色板设计：高饱和度离散色板，
-    优先高对比度颜色，避免相邻细胞类型颜色混淆。
-
-    参数
-    ----
-    adata_sc     : scRNA-seq AnnData，需包含 obsm["X_tsne"] 和 obs[celltype_col]
-    celltype_col : 细胞类型列名（如 "final_celltype"）
-    cluster_col  : 聚类编号列名（如 "res.3"），用于标注聚类编号（可为 None 跳过）
-    save_path    : 图片保存路径
-    dpi          : 输出分辨率
-    """
-    import matplotlib.patches as mpatches
-
-    # 检查 tSNE 坐标是否存在，若不存在则尝试 UMAP 或跳过
-    if "X_tsne" in adata_sc.obsm:
-        embed_key = "X_tsne"
-        xlabel, ylabel = "tSNE 1", "tSNE 2"
-    elif "X_umap" in adata_sc.obsm:
-        embed_key = "X_umap"
-        xlabel, ylabel = "UMAP 1", "UMAP 2"
-    else:
-        LOGGER.warning("Neither X_tsne nor X_umap found; skipping tSNE celltype plot.")
-        return
-
-    if celltype_col not in adata_sc.obs.columns:
-        LOGGER.warning("Cell type column '%s' not found; skipping tSNE plot.", celltype_col)
-        return
-
-    # 高饱和度离散色板（仿论文 tSNE 图颜色风格）
-    PAPER_CLUSTER_COLORS = [
-        "#2ca02c",  # 绿色（T cell）
-        "#9467bd",  # 紫色（Myeloid）
-        "#1f77b4",  # 蓝色（Malignant）
-        "#d62728",  # 红色
-        "#ff7f0e",  # 橙色（NK）
-        "#8c564b",  # 棕色
-        "#e377c2",  # 粉色
-        "#7f7f7f",  # 灰色
-        "#bcbd22",  # 黄绿色
-        "#17becf",  # 青色
-        "#aec7e8",  # 浅蓝
-        "#ffbb78",  # 浅橙
-        "#98df8a",  # 浅绿
-        "#ff9896",  # 浅红
-        "#c5b0d5",  # 浅紫
-        "#c49c94",  # 浅棕
-        "#f7b6d2",  # 浅粉
-        "#c7c7c7",  # 浅灰
-        "#dbdb8d",  # 浅黄绿
-        "#9edae5",  # 浅青
-        "#393b79",  # 深蓝
-        "#637939",  # 深绿
-        "#8c6d31",  # 深棕
-        "#843c39",  # 深红棕
-    ]
-
-    celltypes = sorted(adata_sc.obs[celltype_col].unique())
-    color_map = {ct: PAPER_CLUSTER_COLORS[i % len(PAPER_CLUSTER_COLORS)]
-                 for i, ct in enumerate(celltypes)}
-
-    coords = adata_sc.obsm[embed_key]
-    ct_labels = adata_sc.obs[celltype_col].values
-    colors = [color_map.get(ct, "#bdbdbd") for ct in ct_labels]
-
-    fig, ax = plt.subplots(figsize=(9, 7))
-    ax.scatter(
-        coords[:, 0], coords[:, 1],
-        c=colors, s=5, alpha=0.6, linewidths=0,
-    )
-
-    # 标注每种细胞类型的中心位置
-    for ct in celltypes:
-        mask = ct_labels == ct
-        if mask.sum() == 0:
-            continue
-        cx = float(coords[mask, 0].mean())
-        cy = float(coords[mask, 1].mean())
-        ax.text(cx, cy, ct, fontsize=7.5, ha="center", va="center",
-                fontweight="bold",
-                bbox=dict(boxstyle="round,pad=0.1", fc="white", ec="none", alpha=0.6))
-
-    # 图例（右侧）
-    handles = [
-        mpatches.Patch(facecolor=color_map[ct], label=ct, edgecolor="none")
-        for ct in celltypes
-    ]
-    ax.legend(
-        handles=handles, loc="upper left", bbox_to_anchor=(1.01, 1.0),
-        frameon=False, fontsize=7, ncol=1, title="Cell type",
-        title_fontsize=8,
-    )
-
-    ax.set_xlabel(xlabel, fontsize=9)
-    ax.set_ylabel(ylabel, fontsize=9)
-    ax.set_title("Single-cell Landscape: Cell Type Distribution", fontsize=11)
-    ax.tick_params(left=False, bottom=False, labelleft=False, labelbottom=False)
-    for spine in ax.spines.values():
-        spine.set_visible(False)
-
-    # 添加坐标轴箭头（仿论文风格）
-    ax.annotate("", xy=(0.08, 0.0), xytext=(0.0, 0.0),
-                xycoords="axes fraction", textcoords="axes fraction",
-                arrowprops=dict(arrowstyle="-|>", color="black", lw=1.2))
-    ax.annotate("", xy=(0.0, 0.08), xytext=(0.0, 0.0),
-                xycoords="axes fraction", textcoords="axes fraction",
-                arrowprops=dict(arrowstyle="-|>", color="black", lw=1.2))
-
-    fig.tight_layout()
-    fig.savefig(save_path, dpi=dpi, bbox_inches="tight")
-    plt.close(fig)
-    LOGGER.info("tSNE 细胞类型图已保存: %s", save_path)
-
-
-# ============================================================
-# 辅助函数：细胞类型 Marker 基因热图（仿论文 Figure D 风格）
-# ============================================================
 
 def plot_celltype_marker_heatmap(
     adata_sc,
@@ -371,11 +206,11 @@ def plot_celltype_marker_heatmap(
       - 与参考论文 2.png 配色完全一致
 
     【配色说明】
-    使用 Yellow-Black-Purple 三色渐变（paper_ybp），与论文图 D 的 Expression
+    使用深蓝-青绿-亮黄三色渐变（paper_ybp），与论文图 D 的 Expression
     配色一致：
-      低值 → 深紫色 (#3a0063)
-      中值 → 纯黑色 (#000000)
-      高值 → 亮黄色 (#f5e642)
+      低值 → 深蓝色 (#253494)
+      中值 → 青绿色 (#1FA187)
+      高值 → 亮黄色 (#FDE725)
 
     参数
     ----
@@ -390,10 +225,10 @@ def plot_celltype_marker_heatmap(
     from matplotlib.colors import LinearSegmentedColormap
     from scipy.stats import zscore as scipy_zscore
 
-    # Yellow-Black-Purple 渐变色（仿论文 Figure D 配色）
+    # 深蓝-青绿-亮黄渐变色（统一论文图连续信号配色）
     _PAPER_YBP = LinearSegmentedColormap.from_list(
         "paper_ybp",
-        ["#3a0063", "#000000", "#f5e642"],   # purple → black → yellow
+        ["#253494", "#1FA187", "#FDE725"],
         N=256,
     )
 
@@ -439,18 +274,51 @@ def plot_celltype_marker_heatmap(
     mean_z = mean_expr.apply(lambda col: scipy_zscore(col) if col.std() > 0 else col, axis=0)
     mean_z = mean_z.fillna(0.0)
 
-    # 确定细胞类型列的顺序（按 marker_genes 键中出现的顺序排列）
-    ct_order = []
-    for group in marker_genes:
-        for ct in mean_z.index:
-            if group.lower().replace(" ", "") in ct.lower().replace(" ", "") and ct not in ct_order:
-                ct_order.append(ct)
+    # 固定细胞类型显示顺序，优先满足论文作图需求。
+    preferred_order = [
+        "T/NK",
+        "Treg",
+        "Myeloid",
+        "B",
+        "Endothelial",
+        "Hepatocyte",
+        "Fibroblast",
+    ]
+
+    def _canonical_celltype(name: str) -> str:
+        normalized = name.lower().replace(" ", "").replace("-", "").replace("/", "")
+        alias_map = {
+            "tnk": "T/NK",
+            "tcell": "T/NK",
+            "nk": "T/NK",
+            "treg": "Treg",
+            "myeloid": "Myeloid",
+            "b": "B",
+            "bcell": "B",
+            "bcells": "B",
+            "endothelial": "Endothelial",
+            "hepatocyte": "Hepatocyte",
+            "malignant": "Hepatocyte",
+            "fibroblast": "Fibroblast",
+            "hsc": "Fibroblast",
+        }
+        return alias_map.get(normalized, name)
+
+    canonical_to_ct: dict[str, str] = {}
+    for ct in mean_z.index:
+        canonical = _canonical_celltype(str(ct))
+        canonical_to_ct.setdefault(canonical, ct)
+
+    ct_order = [
+        canonical_to_ct[canonical]
+        for canonical in preferred_order
+        if canonical in canonical_to_ct
+    ]
+
     # 追加未匹配的细胞类型
     for ct in mean_z.index:
         if ct not in ct_order:
             ct_order.append(ct)
-    # 过滤不在 mean_z 中的类型
-    ct_order = [ct for ct in ct_order if ct in mean_z.index]
 
     heatmap_data = mean_z.loc[ct_order, available_genes].T  # 基因为行，细胞类型为列
 
@@ -783,35 +651,23 @@ def main_joint(
         adata_sc_joint.obs["final_celltype"].value_counts().to_string(),
     )
 
-    # ── Step 4+: 绘制 scRNA-seq 细胞类型图（仿论文 Figure C/D 风格）─────────────
+    # ── Step 4+: 绘制 scRNA-seq marker 热图（仿论文 Figure D 风格）──────────────
     LOGGER.info("Step 4+: Generating scRNA-seq cell type visualization plots (paper style)...")
 
-    # 图1：tSNE/UMAP 细胞类型分布图（仿论文 Figure C 风格：docs/plots/1.png）
     _celltype_col = (
         "final_celltype" if "final_celltype" in adata_sc_joint.obs.columns
         else (adata_sc_joint.obs.columns[0] if len(adata_sc_joint.obs.columns) > 0 else "celltype")
     )
-    try:
-        plot_scrna_tsne_celltype(
-            adata_sc_joint,
-            celltype_col=_celltype_col,
-            cluster_col="res.3" if "res.3" in adata_sc_joint.obs.columns else None,
-            save_path=output_dir / "scrna_tsne_celltype.png",
-        )
-    except Exception as exc:
-        LOGGER.warning("tSNE cell type plot failed: %s", exc)
 
-    # 图2：细胞类型 Marker 基因热图（仿论文 Figure D 风格：docs/plots/2.png）
+    # 图：细胞类型 Marker 基因热图（仿论文 Figure D 风格：docs/plots/2.png）
     _CELLTYPE_MARKERS = {
-        "T cell":       ["IL7R", "CD3G", "CD2", "ITM2A", "CD3D"],
+        "T/NK":         ["IL7R", "CD3G", "CD2", "ITM2A", "CD3D"],
+        "Treg":         ["FOXP3", "IL2RA", "CTLA4", "TIGIT", "IKZF2"],
         "Myeloid":      ["LYZ", "AIF1", "RNASE1", "C1QB", "HLA-DRA"],
-        "NK":           ["GNLY", "GZMB", "KLRD1", "KLRF1"],
-        "B cell":       ["B3GNT7", "MS4A1", "BANK1", "CD79A", "TNFRSF13C", "BCL11A"],
-        "Malignant":    ["APOA2", "ALB", "APOA1", "AMBP", "APOH", "TTR"],
+        "B":            ["B3GNT7", "MS4A1", "BANK1", "CD79A", "TNFRSF13C", "BCL11A"],
         "Endothelial":  ["PECAM1", "CDH5", "SPARCL1", "STC1", "SPARC", "TM4SF1"],
-        "Epithelial":   ["INSR", "KRT18", "KRT19", "DEFB1", "CTSK", "EPCAM", "SOX4"],
-        "Plasma cell":  ["JCHAIN", "TCF4", "TCL1A", "IGLL1", "MZB1", "IGLL5", "SSR4"],
-        "HSC":          ["RGS5", "COL1A1", "ACTA2", "PDGFRB"],
+        "Hepatocyte":   ["APOA2", "ALB", "APOA1", "AMBP", "APOH", "TTR"],
+        "Fibroblast":   ["RGS5", "COL1A1", "ACTA2", "PDGFRB"],
     }
     try:
         plot_celltype_marker_heatmap(
@@ -1088,34 +944,21 @@ def main(
             adata_sc_s2.obs["final_celltype"].value_counts().to_string(),
         )
 
-    # ── Step 4+: 绘制 scRNA-seq 细胞类型图（仿论文 Figure C/D 风格）─────────────
+    # ── Step 4+: 绘制 scRNA-seq marker 热图（仿论文 Figure D 风格）──────────────
     LOGGER.info("Step 4+: Generating scRNA-seq cell type visualization plots (paper style)...")
     _celltype_col_s1 = (
         "final_celltype" if "final_celltype" in adata_sc_s1.obs.columns
         else (adata_sc_s1.obs.columns[0] if len(adata_sc_s1.obs.columns) > 0 else "celltype")
     )
-    # 图1：tSNE/UMAP 细胞类型分布图（仿论文 Figure C 风格：docs/plots/1.png）
-    try:
-        plot_scrna_tsne_celltype(
-            adata_sc_s1,
-            celltype_col=_celltype_col_s1,
-            cluster_col="res.3" if "res.3" in adata_sc_s1.obs.columns else None,
-            save_path=output_dir / "scrna_tsne_celltype.png",
-        )
-    except Exception as exc:
-        LOGGER.warning("tSNE cell type plot failed: %s", exc)
-
-    # 图2：细胞类型 Marker 基因热图（仿论文 Figure D 风格：docs/plots/2.png）
+    # 图：细胞类型 Marker 基因热图（仿论文 Figure D 风格：docs/plots/2.png）
     _CELLTYPE_MARKERS = {
-        "T cell":       ["IL7R", "CD3G", "CD2", "ITM2A", "CD3D"],
+        "T/NK":         ["IL7R", "CD3G", "CD2", "ITM2A", "CD3D"],
+        "Treg":         ["FOXP3", "IL2RA", "CTLA4", "TIGIT", "IKZF2"],
         "Myeloid":      ["LYZ", "AIF1", "RNASE1", "C1QB", "HLA-DRA"],
-        "NK":           ["GNLY", "GZMB", "KLRD1", "KLRF1"],
-        "B cell":       ["B3GNT7", "MS4A1", "BANK1", "CD79A", "TNFRSF13C", "BCL11A"],
-        "Malignant":    ["APOA2", "ALB", "APOA1", "AMBP", "APOH", "TTR"],
+        "B":            ["B3GNT7", "MS4A1", "BANK1", "CD79A", "TNFRSF13C", "BCL11A"],
         "Endothelial":  ["PECAM1", "CDH5", "SPARCL1", "STC1", "SPARC", "TM4SF1"],
-        "Epithelial":   ["INSR", "KRT18", "KRT19", "DEFB1", "CTSK", "EPCAM", "SOX4"],
-        "Plasma cell":  ["JCHAIN", "TCF4", "TCL1A", "IGLL1", "MZB1", "IGLL5", "SSR4"],
-        "HSC":          ["RGS5", "COL1A1", "ACTA2", "PDGFRB"],
+        "Hepatocyte":   ["APOA2", "ALB", "APOA1", "AMBP", "APOH", "TTR"],
+        "Fibroblast":   ["RGS5", "COL1A1", "ACTA2", "PDGFRB"],
     }
     try:
         plot_celltype_marker_heatmap(

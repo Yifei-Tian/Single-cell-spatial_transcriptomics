@@ -19,7 +19,8 @@
     results/HCC4R/adata_vis_post.h5ad                            (Step 1)
     results/HCC4R/adata_sc_post.h5ad                             (Step 1)
     results/CHC20/adata_vis_post.h5ad                            (可选，Figure 5)
-    results/CHC20/spatial_niche/spatial_niche_scores.csv         (可选，Figure 5B)
+    results/HCC4R/spatial_niche/immunosuppressive_niche_signature_genes.txt
+    results/CHC20/adata_vis_post.h5ad                            (Figure 5A/5B signature projection)
 
 【使用方式】
     # 先运行 Step 1 + Step 2（以 HCC4R 为主）：
@@ -61,7 +62,8 @@ from paper_plot_functions import (  # noqa: E402
     plot_fig4A_volcano,
     plot_fig4B_niche_marker_heatmap,
     plot_fig4C_pathway_bubble,
-    plot_fig5A_label_transfer,
+    compute_signature_score,
+    plot_fig5A_signature_projection,
     plot_fig5B_validation_violin,
     plot_fig5C_sensitivity,
     _get_abundance,
@@ -90,7 +92,8 @@ def _parse_args() -> argparse.Namespace:
                         default=results / "CHC20" / "adata_vis_post.h5ad")
     parser.add_argument("--scrna-adata", type=Path,
                         default=results / "HCC4R" / "adata_sc_post.h5ad")
-    parser.add_argument("--hcc4r-visium-dir", type=Path, default=None,
+    parser.add_argument("--hcc4r-visium-dir", type=Path,
+                        default=_REPO_ROOT / "data" / "HCC4R",
                         help="HCC4R Visium Space Ranger 原始目录（用于读取 H&E 图）")
     parser.add_argument("--out-dir", type=Path,
                         default=results / "paper_figures")
@@ -180,6 +183,40 @@ def _load_data(args: argparse.Namespace):
     return hcc4r_niche_df, hcc4r_adata, hcc4r_prop_df, chc20_adata, chc20_niche_df
 
 
+def _load_signature_genes(args: argparse.Namespace, ranked_genes_csv: Path) -> list[str]:
+    """Load HCC4R-derived immunosuppressive niche signature genes."""
+    text_candidates = [
+        args.hcc4r_niche_dir / "immunosuppressive_niche_signature_genes.txt",
+        args.hcc4r_niche_dir.parent / "spatial_signature_genes.txt",
+    ]
+    for path in text_candidates:
+        if path.exists():
+            genes = [g.strip() for g in path.read_text(encoding="utf-8").splitlines()]
+            genes = [g for g in genes if g]
+            if genes:
+                logging.info("Loaded HCC4R signature genes: %d from %s", len(genes), path)
+                return genes
+
+    if ranked_genes_csv.exists():
+        ranked = pd.read_csv(ranked_genes_csv)
+        for col in ["gene", "gene_symbol", "names", "index"]:
+            if col in ranked.columns:
+                genes = ranked[col].dropna().astype(str).str.strip().tolist()
+                genes = [g for g in genes if g]
+                if genes:
+                    logging.info(
+                        "Loaded HCC4R signature genes: %d from ranked CSV column '%s'",
+                        len(genes), col,
+                    )
+                    return genes
+
+    logging.warning(
+        "No HCC4R signature gene list found. Checked: %s",
+        ", ".join(str(p) for p in text_candidates + [ranked_genes_csv]),
+    )
+    return []
+
+
 def _resolve_cell_types(
     hcc4r_prop_df: Optional[pd.DataFrame],
     hcc4r_niche_df: Optional[pd.DataFrame],
@@ -251,11 +288,10 @@ def main() -> int:
     logging.info("Figure 1A: Workflow diagram...")
     plot_fig1A_workflow(out_dir, dpi=dpi)
 
-    # 1B / 1C / 1D: 复制 Step 1 已生成的图
+    # 1C / 1D: 复制 Step 1 已生成的图
     if hcc4r_niche_df is not None:
         hcc4r_results_dir = args.hcc4r_niche_dir.parent
         for src_name, dst_name in [
-            ("scrna_tsne_celltype.png",           "fig1B_scrna_tsne_celltype.png"),
             ("scrna_celltype_marker_heatmap.png", "fig1C_scrna_marker_heatmap.png"),
             ("t_cell_dotplot_horizontal.png",     "fig1D_treg_dotplot.png"),
         ]:
@@ -361,31 +397,73 @@ def main() -> int:
     # ============================================================
     logging.info("=== Figure 5 ===")
 
-    # 5A: CHC20 标签迁移（需要 HCC4R + CHC20 双份 AnnData）
-    if hcc4r_niche_df is not None and hcc4r_adata is not None and chc20_adata is not None:
-        logging.info("Figure 5A: Label transfer to CHC20...")
-        plot_fig5A_label_transfer(
-            hcc4r_niche_df, hcc4r_adata, chc20_adata,
+    signature_genes = _load_signature_genes(args, ranked_genes_csv)
+    hcc4r_signature_df: Optional[pd.DataFrame] = None
+    chc20_signature_df: Optional[pd.DataFrame] = None
+    hcc4r_matched_genes: list[str] = []
+    chc20_matched_genes: list[str] = []
+
+    if signature_genes and hcc4r_adata is not None:
+        hcc4r_score, hcc4r_matched_genes = compute_signature_score(
+            hcc4r_adata, signature_genes, score_name="hcc4r_signature_score"
+        )
+        if not hcc4r_score.empty:
+            hcc4r_signature_df = pd.DataFrame({
+                "spot_id": hcc4r_score.index,
+                "sample": "HCC4R",
+                "hcc4r_signature_score": hcc4r_score.to_numpy(dtype=float),
+            })
+
+    if signature_genes and chc20_adata is not None:
+        chc20_score, chc20_matched_genes = compute_signature_score(
+            chc20_adata, signature_genes, score_name="hcc4r_signature_score"
+        )
+        if not chc20_score.empty:
+            chc20_signature_df = pd.DataFrame({
+                "spot_id": chc20_score.index,
+                "sample": "CHC20",
+                "hcc4r_signature_score": chc20_score.to_numpy(dtype=float),
+            })
+
+            logging.info("Figure 5A: HCC4R-derived niche signature projected onto CHC20...")
+            plot_fig5A_signature_projection(
+                chc20_adata, chc20_score, out_dir=out_dir,
+                signature_name="HCC4R-derived niche signature",
+                matched_genes=chc20_matched_genes, dpi=dpi,
+            )
+        else:
+            logging.warning("CHC20 has too few HCC4R signature genes; skipping Figure 5A.")
+    else:
+        logging.warning(
+            "Missing data for Figure 5A. Need HCC4R signature genes and CHC20 adata_vis_post.h5ad."
+        )
+
+    if hcc4r_signature_df is not None and chc20_signature_df is not None:
+        signature_score_csv = out_dir / "fig5_signature_scores_HCC4R_CHC20.csv"
+        pd.concat([hcc4r_signature_df, chc20_signature_df], ignore_index=True).to_csv(
+            signature_score_csv, index=False
+        )
+        logging.info("Saved Figure 5 signature scores: %s", signature_score_csv)
+
+        used_genes = [g for g in signature_genes if g in set(chc20_matched_genes)]
+        if not used_genes:
+            used_genes = chc20_matched_genes
+        (out_dir / "fig5_signature_genes_used_CHC20.txt").write_text(
+            "\n".join(used_genes), encoding="utf-8"
+        )
+
+        logging.info("Figure 5B: HCC4R vs CHC20 signature score distribution...")
+        plot_fig5B_validation_violin(
+            hcc4r_signature_df, chc20_signature_df,
             out_dir=out_dir, dpi=dpi,
         )
     else:
         logging.warning(
-            "Missing data for Figure 5A; skipping. "
-            "(Need: HCC4R niche df + HCC4R adata + CHC20 adata)"
+            "Missing HCC4R or CHC20 signature score; skipping Figure 5B."
         )
-
-    # 5B: 跨队列评分对比小提琴图
-    if hcc4r_niche_df is not None and chc20_niche_df is not None:
-        logging.info("Figure 5B: Cross-cohort validation violin plots...")
-        plot_fig5B_validation_violin(
-            hcc4r_niche_df, chc20_niche_df,
-            out_dir=out_dir, dpi=dpi,
-        )
-    else:
-        logging.warning("CHC20 niche df not available; skipping Figure 5B.")
 
     # 5C: 敏感性分析 + 参数扫描（直接读取 Step 2 输出的 CSV）
-    logging.info("Figure 5C: Sensitivity and parameter scan...")
+    logging.info("Figure 5C: Sensitivity analysis...")
     plot_fig5C_sensitivity(args.hcc4r_niche_dir, out_dir, dpi=dpi)
 
     # ============================================================

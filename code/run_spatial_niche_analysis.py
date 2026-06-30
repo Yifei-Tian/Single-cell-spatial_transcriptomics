@@ -65,7 +65,7 @@
                  · 纵轴：k（8 / 10 / 15 / 20 / 25）
                  · 颜色：FDR<0.05 且 log2FC>0.5 的 DEG 数量
                选参标准：颜色最深且处于"高原"区域（与相邻格子结果相近）的
-               参数组合为推荐；若主流程参数（k=15, q=0.85）位于高原区，则合理。
+               参数组合为推荐；若主流程参数（k=15, q=0.80）位于高原区，则合理。
 
 【niche 识别策略说明（参考 docs/niche修改.md）】
     - niche 发现主体：空间邻接图 → 邻域组成向量 → Leiden 无监督聚类；
@@ -73,32 +73,13 @@
     - 双层验证：Leiden 聚类法（无监督）与评分阈值法（规则化）并排可视化对比。
 
 【输入文件】
-    <out_dir>/../adata_vis_post.h5ad   - Cell2location 反卷积后的空间 AnnData
-                                         （由 run_preprocessing.py / pipeline/run_preprocessing.py
-                                          Step 6 生成；通过 --adata 参数指定路径）
-                                         对于 HCC4R 主分析：results/HCC4R/adata_vis_post.h5ad
-                                         对于 CHC20 验证分析：results/CHC20/adata_vis_post.h5ad
-
-【命令行关键参数】
-    --adata                  输入 AnnData 路径（必填）
-    --out-dir                输出目录路径（默认 results/spatial_niche/）
-    --n-neighbors            kNN 邻居数（默认 15，经参数扫描验证为最优值）
-    --niche-high-quantile    niche_high 分位数阈值（默认 0.85，经参数扫描验证为最优值）
-    --per-sample-neighbors   联合分析模式：跨样本 kNN 限制在同一切片内（适用于合并 h5ad）
-    --leiden-resolution      Leiden 聚类分辨率（默认 0.5）
+    results/adata_vis_post.h5ad     - CHC20 Cell2location 反卷积后的空间 AnnData
+                                      （由 run_preprocessing.py Step 6 生成）
 
 【输出文件】
-    <out_dir>/
+    results/spatial_niche/
       spatial_niche_scores.csv                           - 完整 spot 级别评分表
-                                                           列：spot_id / 各细胞类型比例 /
-                                                               spatial_x / spatial_y /
-                                                               immunosuppressive_gene_score /
-                                                               Treg_like_score / immune_stroma_score /
-                                                               immunosuppressive_niche_score /
-                                                               niche_high / spatial_region /
-                                                               neighborhood_cluster / niche_semantic_label
       spatial_niche_parameters.csv                       - 分析参数与阈值元数据
-                                                           （记录 n_neighbors=15, niche_high_quantile=0.85 等）
       sensitivity_analysis.csv                           - 敏感性分析结果
                                                            （含 spearman_rho / weighted_jaccard 两指标）
       neighborhood_cluster_stats.csv                     - 邻域聚类簇统计信息
@@ -107,7 +88,7 @@
                                                                log2_fc / frac_high / frac_low /
                                                                delta_frac / composite_score /
                                                                pvalue / fdr
-      immunosuppressive_niche_signature_genes.txt        - 签名基因列表（TCGA ssGSEA 投影接口）
+      immunosuppressive_niche_signature_genes.txt        - 签名基因列表（TCGA 投影接口）
       prior_gene_set_auc.csv                             - Layer 2 先验基因集 AUC 检验结果
                                                            （含 frac_high / frac_low / delta_frac 列）
       gini_score_genes.csv                               - Layer 3 Gini Index 特异性基因
@@ -126,7 +107,6 @@
         spatial_niche_semantic_labels.png                - 语义 niche 标签空间图
         spatial_region_labels.png                        - 辅助区域标注空间图
         spatial_niche_high_score_spots.png               - niche_high 二值分布图
-                                                           （niche_high_quantile=0.85 阈值截断结果）
         spatial_niche_cluster_vs_score_comparison.png   - 聚类法 vs 评分法对比图
         distance_to_hep_high_vs_niche_score.png         - 距离-niche评分折线图
         region_score_boxplots.png                        - 各区域评分箱线图
@@ -139,13 +119,12 @@
                                                            （delta_frac vs log2FC；突出 FOXP3 等
                                                             稀有免疫基因的 niche 富集，补充火山图）
         param_scan_deg_stability_heatmap.png             - 参数扫描稳定性热图
-                                                           （k × niche_high_quantile 网格；
-                                                            最优点：k=15, q=0.85）
+    results/spatial_signature_genes.txt                  - 签名基因（TCGA 投影用途）
 
 【依赖关系】
-    上游：pipeline/run_preprocessing.py 或 run_preprocessing.py
-          （生成 adata_vis_post.h5ad；HCC4R 主分析通过 run_hcc4r.py 调用）
-    下游：pipeline/run_paper_figures.py（读取 spatial_niche_scores.csv 生成论文图表）
+    上游：run_preprocessing.py（生成 adata_vis_post.h5ad）
+    下游：run_chc23_validation.py（读取 spatial_niche/ 进行跨切片验证）
+          run_de_analysis.py（读取 spatial_niche_scores.csv 进行 DE 分析）
           tcga_survival_analysis.R（读取 spatial_signature_genes.txt 进行 ssGSEA 预后分析）
 
 【参考文献】
@@ -322,7 +301,7 @@ def _parse_args() -> argparse.Namespace:
         help="高肝细胞区域分位数阈值（辅助空间区域标注用）",
     )
     parser.add_argument(
-        "--niche-high-quantile", type=float, default=0.85,
+        "--niche-high-quantile", type=float, default=0.80,
         help="高免疫抑制 niche 分位数阈值（用于签名提取分组）",
     )
     parser.add_argument(
@@ -777,7 +756,7 @@ def _sensitivity_analysis(
     fibroblast_col: str,
     n_neighbors_list: tuple[int, ...] = (10, 15, 20),
     radius_multiplier_list: tuple[float, ...] = (1.0, 1.25, 1.5),
-    niche_high_quantile: float = 0.85,
+    niche_high_quantile: float = 0.80,
     ref_k: int = 15,
 ) -> pd.DataFrame:
     """

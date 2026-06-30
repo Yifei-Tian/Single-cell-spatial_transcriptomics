@@ -281,7 +281,7 @@ results/
 | **内容** | 每个邻域聚类簇的统计信息：spot 数量（n_spots）、各细胞类型的均值比例、平均 niche score 等 |
 | **用途** | 理解各 Leiden 聚类簇的生物学特征；辅助人工核查聚类结果是否合理 |
 
-#### `immunosuppressive_niche_signature_genes_ranked.csv`
+#### `immunosuppressive_niche_signature_genes_ranked.csv` ==p值和fdr都很小==
 
 | 属性 | 说明 |
 |------|------|
@@ -317,7 +317,7 @@ results/
 | **内容** | 同 `immunosuppressive_niche_signature_genes.txt`，是通过 `--signature-out` 参数单独指定路径的副本 |
 | **用途** | 标准化接口文件，专供 TCGA 生存分析脚本读取 |
 
-#### `prior_gene_set_auc.csv`
+#### `prior_gene_set_auc.csv` ==fdr与auc==
 
 | 属性 | 说明 |
 |------|------|
@@ -326,7 +326,7 @@ results/
 | **解读** | AUC > 0.6 且 delta_frac > 0.05 的先验基因被强制纳入签名基因集（即使 Wilcoxon FDR 未达阈值） |
 | **用途** | 记录 Layer 2 先验基因集检验结果，解释为什么 FOXP3 等低表达基因也能被纳入签名 |
 
-#### `gini_score_genes.csv`
+#### `gini_score_genes.csv` ==空的==
 
 | 属性 | 说明 |
 |------|------|
@@ -341,7 +341,7 @@ results/
 | 属性 | 说明 |
 |------|------|
 | **格式** | CSV，每行为一种参数组合（k × quantile，共 5×4=20 行） |
-| **主要列** | `k`（kNN 邻居数）、`quantile`（niche_high 分位数阈值）、`n_sig_deg`（FDR<0.05 且 log2FC>0.5 的 DEG 数量）、`mean_log2fc_topN`（Top-N 基因的平均 log2FC）、`top_genes_str`（Top-20 基因名，分号分隔） |
+| **主要列** | `k`（kNN 邻居数）、`quantile`（niche_high 分位数阈值）、`n_sig_deg`（FDR<0.05 且 log2FC>0.5 的 DEG 数量）、`mean_log2fc_topN`（Top-N 基因的平均 log2FC）、`top_genes_str`（Top-20 基因名，分号分隔） ==各个量的含义== |
 | **用途** | 参数扫描热图的数据来源；辅助选择最优 k 和 quantile 参数组合（选颜色最深的高原区域） |
 
 ---
@@ -442,7 +442,7 @@ results/
 | **颜色** | 每格颜色=niche_high 中的 product score 均值，行=配体，列=受体 |
 | **意义** | 探索免疫抑制 niche 中活跃的细胞间通讯信号轴 |
 
-#### `sensitivity_niche_stability.png`
+#### `sensitivity_niche_stability.png` ==没有==
 
 | 属性 | 说明 |
 |------|------|
