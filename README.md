@@ -6,6 +6,8 @@
 - **HCC4R**（Discovery Cohort）：主分析数据集，运行完整三步流程
 - **CHC20**（Validation Cohort）：独立验证数据集，用于 Figure 5 跨队列验证
 
+> **最新更新**：Figure 5 已升级为双模块评分体系（免疫模块 + 基质/ECM 模块），签名基因筛选引入 `signature_rank_score` 综合排序与非特异性基因过滤。详见 [Figure 5 说明](#figure-5-双模块评分验证)。
+
 ---
 
 ## 目录
@@ -19,6 +21,7 @@
   - [分步骤运行](#分步骤运行)
   - [TCGA 生存分析（R）](#tcga-生存分析r)
 - [输出文件结构](#输出文件结构)
+- [Figure 5 双模块评分验证](#figure-5-双模块评分验证)
 - [pipeline/ 核心脚本说明](#pipeline-核心脚本说明)
 - [utils/ 工具脚本说明](#utils-工具脚本说明)
 - [依赖环境](#依赖环境)
@@ -310,16 +313,49 @@ results/paper_figures/                         - Step 3 论文图表（DPI=300�
 ├── fig4B_niche_fraction_scatter.png           - 检出率差值散点图（捕获 FOXP3 等稀有基因）
 ├── fig4C_lr_communication_heatmap.png         - 配体-受体通讯分析热图
 ├── fig4D_celltype_correlation.png             - 细胞类型相关性热图
-├── fig5A_chc20_spatial_niche_score.png        - CHC20 niche 评分空间图（跨队列验证）
-├── fig5B_chc20_spatial_niche_semantic.png     - CHC20 语义 niche 标签图
-├── fig5C_chc20_spatial_treg.png               - CHC20 Treg 空间分布
-├── fig5D_rf_confusion_matrix.png              - Random Forest 标签迁移混淆矩阵
-├── fig5E_rf_feature_importance.png            - Random Forest 特征重要性
-├── fig6A_sensitivity_stability.png            - 敏感性分析（Spearman ρ + Jaccard）
-└── fig6B_param_scan_heatmap.png               - k × quantile 参数扫描热图
+├── fig5A_chc20_immune_module_score.png        - CHC20 免疫模块空间评分图（Fig.5A 新版）
+├── fig5B_chc20_stromal_ECM_module_score.png   - CHC20 基质/ECM 模块空间评分图（Fig.5B 新版）
+├── fig5C_chc20_combined_niche_score.png       - CHC20 组合 niche score（z_immune + z_stromal，Fig.5C）
+├── fig5D_combined_score_HCC4R_vs_CHC20.png   - HCC4R vs CHC20 combined niche score 分布对比（Fig.5D）
+├── fig5_dual_module_scores_HCC4R.csv          - HCC4R 三列评分数据表（免疫/基质/组合）
+├── fig5_dual_module_scores_CHC20.csv          - CHC20 三列评分数据表（免疫/基质/组合）
+├── fig5_immune_genes_used_CHC20.txt           - CHC20 实际匹配到的免疫模块基因列表
+├── fig5_stromal_genes_used_CHC20.txt          - CHC20 实际匹配到的基质模块基因列表
+└── fig5C_sensitivity_stability.png            - 敏感性分析（Spearman ρ + Jaccard，补充图）
 ```
 
 > 输出文件详细说明见 [`docs/result_explain.md`](docs/result_explain.md)
+
+---
+
+## Figure 5 双模块评分验证
+
+Figure 5 对应论文中的 **CHC20 跨队列验证部分**，已从单一签名评分升级为双模块评分体系，更准确地反映免疫抑制空间微环境的双重特征（免疫抑制信号 + 基质重塑信号）。
+
+### 评分体系
+
+| 评分名称 | 计算公式 | 生物学含义 |
+|---|---|---|
+| `immune_signature_score` | mean(E_ig, g ∈ 免疫模块基因) | 反映 Treg/TAM 介导的免疫抑制强度 |
+| `stromal_ECM_signature_score` | mean(E_ig, g ∈ 基质模块基因) | 反映 CAF/ECM 重塑介导的屏障效应 |
+| `immune_stromal_niche_score` | z(immune) + z(stromal) | 综合 niche 强度（两模块 Z-score 之和） |
+
+其中 `E_ig` 为 log1p-normalized(10k) 表达量，`z(·)` 为跨 spot 的 Z-score 标准化。
+
+### 生成的图表（输出到 `results/paper_figures/`）
+
+| 图表文件 | 内容 |
+|---|---|
+| `fig5A_chc20_immune_module_score.png` | CHC20 免疫模块空间投影（paper_ybp 配色） |
+| `fig5B_chc20_stromal_ECM_module_score.png` | CHC20 基质/ECM 模块空间投影 |
+| `fig5C_chc20_combined_niche_score.png` | CHC20 组合 niche score 空间投影 |
+| `fig5D_combined_score_HCC4R_vs_CHC20.png` | HCC4R vs CHC20 评分分布对比（Mann-Whitney U 检验） |
+
+### 自定义模块基因
+
+**方式 1**（推荐）：在 `immunosuppressive_niche_signature_genes_ranked.csv` 中增加 `module` 列，取值为 `"immune"` 或 `"stromal"`/`"ecm"`，脚本将自动读取。
+
+**方式 2**：直接修改 `run_paper_figures.py` 中 `_split_module_genes()` 函数内的 `_IMMUNE_GENES_DEFAULT` 和 `_STROMAL_GENES_DEFAULT` 列表。
 
 ---
 
@@ -349,17 +385,30 @@ results/paper_figures/                         - Step 3 论文图表（DPI=300�
 **两阶段核心逻辑**：
 
 1. **无监督发现**：k=15 kNN 邻域平滑 → Leiden 聚类 → 四维评分排名 → 识别 `immunosuppressive_niche`
-2. **基因筛选（三层）**：
-   - Layer 1：Wilcoxon + BH-FDR（q=0.85 截断分组）
-   - Layer 2：先验基因集 AUC（Treg/TAM/CAF 先验基因强制纳入）
+2. **基因筛选（三层，已升级）**：
+   - Layer 1：Wilcoxon + BH-FDR + AUC + `signature_rank_score` 综合排序
+     - 筛选条件：`FDR < 0.1 AND AUC > 0.60 AND (log2FC > 0.3 OR delta_frac > 0.10)`
+     - 自动放宽：基因数 < 80 时，放宽至 `FDR < 0.2 AND AUC > 0.55 AND (FC > 0.2 OR Δfrac > 0.05)`
+     - 非特异性基因过滤：管家基因、核糖体基因、线粒体基因、血红蛋白基因、细胞周期基因等
+   - Layer 2：先验基因集 AUC（Treg/TAM/CAF 先验基因强制纳入，排除非特异性基因）
    - Layer 3：Gini Index（阈值 0.3，捕获 FOXP3 等稀有局灶性基因）
+
+**签名基因综合排序公式**：
+
+```
+signature_rank_score = 0.35 × minmax(log2FC)
+                     + 0.35 × minmax(delta_frac)
+                     + 0.30 × minmax(AUC)
+```
 
 **关键设计**：
 
 | 特性 | 说明 |
 |---|---|
 | 最优参数 k=15, q=0.85 | 经 k × quantile 二维参数扫描验证（`param_scan_deg_stability_heatmap.png`） |
-| delta_frac 指标 | 计算 spot 检出率差值，解决 Visium 稀释效应对稀有基因（FOXP3）不敏感的问题 |
+| delta_frac 指标 | 计算 spot 检出率差值（`frac_high - frac_low`），解决 Visium 稀释效应对稀有基因（FOXP3）不敏感的问题 |
+| signature_rank_score | 三维综合排序评分（log2FC + delta_frac + AUC 加权融合） |
+| 非特异性基因过滤 | 管家/核糖体/线粒体/血红蛋白/细胞周期/广谱炎症/组织损伤基因黑名单（共 350+ 个） |
 | Gini Index 阈值 0.3 | 覆盖局灶性高表达稀有免疫基因（原为 0.5，已优化） |
 | `--per-sample-neighbors` | 联合分析时可启用，kNN 邻域只在同一切片内建立 |
 
@@ -370,8 +419,18 @@ results/paper_figures/                         - Step 3 论文图表（DPI=300�
 **功能**：Step 3，生成适合期刊投稿的高质量论文图表（DPI=300）。
 
 - 基于 Step 1（HCC4R AnnData）和 Step 2（niche scores CSV）的输出
-- 生成论文 Figure 1–6 的所有子图，每张独立保存到 `results/paper_figures/`
-- Figure 5 需要 CHC20 的分析结果（`results/CHC20/`）
+- 生成论文 Figure 1–5 的所有子图，每张独立保存到 `results/paper_figures/`
+- Figure 5 需要 CHC20 的分析结果（`results/CHC20/adata_vis_post.h5ad`）
+
+**Figure 5 新版流程（双模块评分）**：
+
+1. 从 `immunosuppressive_niche_signature_genes_ranked.csv` 读取 `module` 列拆分免疫/基质基因
+2. 若无 `module` 列，自动使用内置先验基因列表（免疫模块 21 个 + 基质模块 21 个）
+3. 分别在 HCC4R 和 CHC20 上计算三套评分：
+   - `immune_signature_score` = 免疫模块基因均值表达
+   - `stromal_ECM_signature_score` = 基质/ECM 模块基因均值表达
+   - `immune_stromal_niche_score` = z(immune) + z(stromal)（跨 spot Z-score 之和）
+4. 输出 Fig.5A（免疫模块空间图）、Fig.5B（基质模块空间图）、Fig.5C（组合 niche 空间图）、Fig.5D（HCC4R vs CHC20 对比小提琴图）
 
 **修改绘图样式**：只需编辑 `code/pipeline/paper_plot_functions.py`（绘图函数库），无需改动数据准备逻辑：
 

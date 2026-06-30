@@ -17,6 +17,7 @@
       _proportions(abundance) → pd.DataFrame
       _wilcoxon_test(high_vals, low_vals) → float
       _p_label(p) → str
+      _resolve_domain_col(spatial_df, preferred) → Optional[str]
 
     ── Figure 1 ──
       plot_fig1A_workflow(out_dir, dpi)
@@ -36,17 +37,45 @@
       plot_fig4B_niche_marker_heatmap(adata, spatial_df, ranked_genes_path, out_dir, top_n, domain_col, sample_name, dpi)
       plot_fig4C_pathway_bubble(adata, spatial_df, out_dir, domain_col, sample_name, dpi)
 
-    ── Figure 5 ──
+    ── Figure 5（新版，双模块评分）★ 当前默认使用 ──
+      compute_dual_module_scores(adata, immune_genes, stromal_genes, min_genes)
+        → (immune_score, stromal_score, combined_score, m_immune, m_stromal)
+        三套评分公式：
+          immune_signature_score_i   = mean(E_ig for g in immune_genes)
+          stromal_ECM_signature_score_i = mean(E_ig for g in stromal_genes)
+          immune_stromal_niche_score_i  = z(immune_score) + z(stromal_score)
+        其中 z(·) 为跨 spot Z-score 标准化。
+      plot_fig5A_immune_spatial(chc20_adata, immune_score, out_dir, matched_genes, dpi)
+        → 输出 fig5A_chc20_immune_module_score.png
+      plot_fig5B_stromal_spatial(chc20_adata, stromal_score, out_dir, matched_genes, dpi)
+        → 输出 fig5B_chc20_stromal_ECM_module_score.png
+      plot_fig5C_combined_niche_spatial(chc20_adata, combined_score, out_dir, dpi)
+        → 输出 fig5C_chc20_combined_niche_score.png
+      plot_fig5D_comparison_violin(hcc4r_combined, chc20_combined, out_dir, dpi)
+        → 输出 fig5D_combined_score_HCC4R_vs_CHC20.png
+      _spatial_score_plot(adata, score, out_path, title, cbar_label, dpi, cmap)  # 内部通用函数
+
+    ── Figure 5（旧版，向后兼容，不再作为默认调用）──
       compute_signature_score(adata, signature_genes, score_name, min_genes)
+        → 单一均值 signature score（旧版方案）
       plot_fig5A_signature_projection(chc20_adata, signature_score, out_dir, signature_name, matched_genes, dpi)
+      plot_fig5A_label_transfer(hcc4r_niche_df, hcc4r_adata, chc20_adata, out_dir, domain_col, dpi)
       plot_fig5B_validation_violin(hcc4r_score_df, chc20_score_df, out_dir, score_cols, dpi)
-      plot_fig5C_sensitivity(hcc4r_niche_dir, out_dir, dpi)
-      _plot_sensitivity_paper(sens_df, path, dpi)         # 内部子函数
+      plot_fig5C_sensitivity(hcc4r_niche_dir, out_dir, dpi)        # 敏感性分析（用作补充图）
+      _plot_sensitivity_paper(sens_df, path, dpi)                   # 内部子函数
+
+【Figure 5 升级说明】
+    原方案（单一签名评分）：对所有签名基因计算均值表达，单一分值难以区分免疫/基质双重特征。
+    新方案（双模块评分）：
+      · 免疫模块（21 个先验基因）：Treg/TAM 免疫抑制相关（FOXP3/IL2RA/CTLA4/CD163 等）
+      · 基质/ECM 模块（21 个先验基因）：CAF/ECM 重塑相关（FAP/ACTA2/COL1A1/SPP1 等）
+      · 组合 niche score = z_immune + z_stromal（双轴 Z-score 加和，保留方向性）
 
 【修改建议】
     - 修改全局配色：直接修改 PAPER_YBP / PAPER_CLUSTER_COLORS / DOMAIN_COLORS / CELLTYPE_COLORS
     - 修改 DPI：修改 PAPER_DPI 常量（或在调用时传入 dpi 参数）
     - 修改单张图的样式：直接找到对应函数，修改其中的 figsize / fontsize / alpha 等参数
+    - 修改模块基因：编辑 run_paper_figures.py 中 _split_module_genes() 的默认基因列表
     - 添加新图：在本文件中新增函数，再在 run_paper_figures.py 中调用即可
 ================================================================================
 """
@@ -1172,7 +1201,277 @@ def plot_fig4C_pathway_bubble(
 
 
 # ============================================================
-# Figure 5A: HCC4R-derived signature projection in CHC20
+# Figure 5（新版）：双模块评分 + 组合 niche score
+# ============================================================
+
+def compute_dual_module_scores(
+    adata: ad.AnnData,
+    immune_genes: list[str],
+    stromal_genes: list[str],
+    min_genes: int = 3,
+) -> tuple[pd.Series, pd.Series, pd.Series, list[str], list[str]]:
+    """计算免疫模块、基质/ECM 模块及组合 niche score（双模块评分）。
+
+    三套 score 的计算公式：
+      1. immune_signature_score_i   = mean(E_ig for g in immune_genes)
+      2. stromal_ECM_signature_score_i = mean(E_ig for g in stromal_genes)
+      3. immune_stromal_niche_score_i  = z(immune_score) + z(stromal_score)
+
+    其中 E_ig 为 log1p-normalized(10k) 表达量，z(·) 为跨 spot 的 z-score 标准化。
+
+    参数
+    ----
+    adata         : AnnData（提供基因表达矩阵）
+    immune_genes  : 免疫模块基因列表（用户可在此直接修改）
+    stromal_genes : 基质/ECM 模块基因列表（用户可在此直接修改）
+    min_genes     : 最少需匹配的基因数，否则返回空 Series
+
+    返回
+    ----
+    (immune_score, stromal_score, combined_score,
+     matched_immune_genes, matched_stromal_genes)
+    其中每个 score 均为 pd.Series，index = spot_id；
+    未达到 min_genes 的模块其 score 为空 Series。
+    """
+    expr = _expression_frame(adata)
+    var_names = pd.Index(expr.columns.astype(str))
+    upper_lookup = {g.upper(): g for g in var_names}
+
+    def _match(gene_list: list[str]) -> list[str]:
+        matched: list[str] = []
+        seen: set[str] = set()
+        for g in gene_list:
+            g_str = str(g).strip()
+            hit = g_str if g_str in var_names else upper_lookup.get(g_str.upper())
+            if hit is not None and hit not in seen:
+                matched.append(hit)
+                seen.add(hit)
+        return matched
+
+    def _zscore_safe(s: pd.Series) -> pd.Series:
+        """对 Series 做 z-score 标准化；若标准差 ≈ 0 则返回全零 Series。"""
+        std = float(s.std(ddof=1))
+        if std < 1e-12:
+            return pd.Series(0.0, index=s.index, name=s.name)
+        return ((s - s.mean()) / std).rename(s.name)
+
+    m_immune  = _match(immune_genes)
+    m_stromal = _match(stromal_genes)
+
+    # ── 免疫模块 score ────────────────────────────────────────────────────────
+    if len(m_immune) >= min_genes:
+        immune_score = expr[m_immune].mean(axis=1).rename("immune_signature_score")
+    else:
+        logging.warning(
+            "Only %d/%d immune genes found (need %d); immune score will be empty.",
+            len(m_immune), len(immune_genes), min_genes,
+        )
+        immune_score = pd.Series(dtype=float, name="immune_signature_score")
+
+    # ── 基质/ECM 模块 score ──────────────────────────────────────────────────
+    if len(m_stromal) >= min_genes:
+        stromal_score = expr[m_stromal].mean(axis=1).rename("stromal_ECM_signature_score")
+    else:
+        logging.warning(
+            "Only %d/%d stromal genes found (need %d); stromal score will be empty.",
+            len(m_stromal), len(stromal_genes), min_genes,
+        )
+        stromal_score = pd.Series(dtype=float, name="stromal_ECM_signature_score")
+
+    # ── 组合 niche score：z(immune) + z(stromal) ─────────────────────────────
+    if not immune_score.empty and not stromal_score.empty:
+        z_immune  = _zscore_safe(immune_score)
+        z_stromal = _zscore_safe(stromal_score)
+        combined_score = (z_immune + z_stromal).rename("immune_stromal_niche_score")
+    else:
+        combined_score = pd.Series(dtype=float, name="immune_stromal_niche_score")
+
+    logging.info(
+        "Dual-module scores computed | immune_genes=%d/%d | stromal_genes=%d/%d",
+        len(m_immune), len(immune_genes),
+        len(m_stromal), len(stromal_genes),
+    )
+    return immune_score, stromal_score, combined_score, m_immune, m_stromal
+
+
+def _spatial_score_plot(
+    adata: ad.AnnData,
+    score: pd.Series,
+    out_path: Path,
+    title: str,
+    cbar_label: str = "Score",
+    dpi: int = PAPER_DPI,
+    cmap=None,
+) -> None:
+    """通用：将一个 spot-level score 投影到 CHC20 空间坐标上并保存图片。"""
+    if "spatial" not in adata.obsm:
+        logging.warning("No obsm['spatial'] in AnnData; skipping %s.", out_path.name)
+        return
+
+    score = score.reindex(adata.obs_names).dropna()
+    if score.empty:
+        logging.warning("Score is empty; skipping %s.", out_path.name)
+        return
+
+    if cmap is None:
+        cmap = PAPER_YBP
+
+    coords = np.asarray(adata.obsm["spatial"])
+    coord_df = pd.DataFrame(coords, index=adata.obs_names, columns=["x", "y"]).loc[score.index]
+    values = score.to_numpy(dtype=float)
+
+    if len(values) > 2:
+        vmin, vmax = np.percentile(values, [2, 98])
+        if np.isclose(vmin, vmax):
+            vmin, vmax = float(np.nanmin(values)), float(np.nanmax(values))
+    else:
+        vmin, vmax = float(np.nanmin(values)), float(np.nanmax(values))
+
+    fig, ax = plt.subplots(figsize=(7.5, 7.5))
+    sc = ax.scatter(
+        coord_df["x"], coord_df["y"],
+        c=values, s=SPOT_SIZE, cmap=cmap,
+        vmin=vmin, vmax=vmax, linewidths=0, alpha=0.92,
+    )
+    cbar = fig.colorbar(sc, ax=ax, fraction=0.04, pad=0.02, shrink=0.68)
+    cbar.set_label(cbar_label, fontsize=10)
+    cbar.ax.tick_params(labelsize=8)
+    ax.set_title(title, fontsize=12, fontweight="bold")
+    ax.set_aspect("equal")
+    ax.axis("off")
+    _save(fig, out_path, dpi=dpi)
+
+
+def plot_fig5A_immune_spatial(
+    chc20_adata: ad.AnnData,
+    immune_score: pd.Series,
+    out_dir: Path,
+    matched_genes: Optional[list[str]] = None,
+    dpi: int = PAPER_DPI,
+) -> None:
+    """Fig.5A: CHC20 immune module spatial score 空间投影图。"""
+    n_genes = len(matched_genes) if matched_genes else "?"
+    _spatial_score_plot(
+        chc20_adata,
+        immune_score,
+        out_dir / "fig5A_chc20_immune_module_score.png",
+        title=f"Fig.5A  CHC20: Immune Module Spatial Score\n(n={n_genes} genes)",
+        cbar_label="Immune module score",
+        dpi=dpi,
+    )
+
+
+def plot_fig5B_stromal_spatial(
+    chc20_adata: ad.AnnData,
+    stromal_score: pd.Series,
+    out_dir: Path,
+    matched_genes: Optional[list[str]] = None,
+    dpi: int = PAPER_DPI,
+) -> None:
+    """Fig.5B: CHC20 stromal/ECM module spatial score 空间投影图。"""
+    n_genes = len(matched_genes) if matched_genes else "?"
+    _spatial_score_plot(
+        chc20_adata,
+        stromal_score,
+        out_dir / "fig5B_chc20_stromal_ECM_module_score.png",
+        title=f"Fig.5B  CHC20: Stromal/ECM Module Spatial Score\n(n={n_genes} genes)",
+        cbar_label="Stromal/ECM module score",
+        dpi=dpi,
+    )
+
+
+def plot_fig5C_combined_niche_spatial(
+    chc20_adata: ad.AnnData,
+    combined_score: pd.Series,
+    out_dir: Path,
+    dpi: int = PAPER_DPI,
+) -> None:
+    """Fig.5C: CHC20 combined immune-stromal niche score 空间投影图。"""
+    _spatial_score_plot(
+        chc20_adata,
+        combined_score,
+        out_dir / "fig5C_chc20_combined_niche_score.png",
+        title="Fig.5C  CHC20: Combined Immune-Stromal Niche Score\n(z_immune + z_stromal)",
+        cbar_label="Combined niche score",
+        dpi=dpi,
+    )
+
+
+def plot_fig5D_comparison_violin(
+    hcc4r_combined: pd.Series,
+    chc20_combined: pd.Series,
+    out_dir: Path,
+    dpi: int = PAPER_DPI,
+) -> None:
+    """Fig.5D: HCC4R vs CHC20 combined niche score 分布对比图（小提琴+箱线图）。
+
+    参数
+    ----
+    hcc4r_combined : HCC4R 每个 spot 的 combined niche score（pd.Series）
+    chc20_combined : CHC20 每个 spot 的 combined niche score（pd.Series）
+    """
+    hcc4r_vals = hcc4r_combined.dropna().to_numpy(dtype=float)
+    chc20_vals = chc20_combined.dropna().to_numpy(dtype=float)
+
+    if len(hcc4r_vals) == 0 or len(chc20_vals) == 0:
+        logging.warning("HCC4R or CHC20 combined score is empty; skipping Fig.5D.")
+        return
+
+    if len(hcc4r_vals) > 1 and len(chc20_vals) > 1:
+        _, p_val = scipy_stats.mannwhitneyu(hcc4r_vals, chc20_vals, alternative="two-sided")
+    else:
+        p_val = 1.0
+
+    fig, ax = plt.subplots(figsize=(7, 5.5))
+    groups    = [hcc4r_vals, chc20_vals]
+    positions = [0, 1]
+    colors_vl = ["#f4b41a", "#143d59"]
+    labels    = ["HCC4R\n(Discovery)", "CHC20\n(Validation)"]
+
+    vp = ax.violinplot(groups, positions=positions, widths=0.6,
+                       showmedians=True, showextrema=True)
+    for i, pc in enumerate(vp["bodies"]):
+        pc.set_facecolor(colors_vl[i])
+        pc.set_alpha(VIOLIN_ALPHA)
+        pc.set_edgecolor("white")
+    vp["cmedians"].set_color("#222")
+    vp["cmedians"].set_linewidth(2.2)
+
+    ax.boxplot(
+        groups, positions=positions, widths=0.1, patch_artist=True,
+        medianprops=dict(color="black", linewidth=2),
+        boxprops=dict(facecolor="white", alpha=0.9, linewidth=1),
+        whiskerprops=dict(linewidth=0), capprops=dict(linewidth=0),
+        flierprops=dict(marker=""),
+    )
+
+    all_vals = np.concatenate(groups)
+    y_max  = np.percentile(all_vals, 99)
+    y_span = np.percentile(all_vals, 99) - np.percentile(all_vals, 1)
+    if np.isclose(y_span, 0):
+        y_span = max(abs(float(y_max)), 1.0)
+    bh = y_max + y_span * 0.08
+    ax.plot([0, 0, 1, 1], [bh, bh + y_span * 0.03, bh + y_span * 0.03, bh],
+            c="#333", lw=1)
+    p_str = f"p={p_val:.3f}" if p_val >= 0.001 else "p<0.001"
+    ax.text(0.5, bh + y_span * 0.04, p_str, ha="center", va="bottom",
+            fontsize=10, color="#333")
+
+    ax.set_xticks(positions)
+    ax.set_xticklabels(labels, fontsize=11, fontweight="bold")
+    ax.set_ylabel("Combined Immune-Stromal Niche Score", fontsize=11)
+    ax.set_title(
+        "Fig.5D  HCC4R vs CHC20\nCombined Niche Score Distribution",
+        fontsize=12, fontweight="bold",
+    )
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+    ax.tick_params(axis="y", labelsize=9)
+    _save(fig, out_dir / "fig5D_combined_score_HCC4R_vs_CHC20.png", dpi=dpi)
+
+
+# ============================================================
+# Figure 5A (旧版): HCC4R-derived signature projection in CHC20
 # ============================================================
 
 def plot_fig5A_signature_projection(

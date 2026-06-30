@@ -1,7 +1,7 @@
 """
 ================================================================================
 脚本名称: run_paper_figures.py
-功能概述: 论文图表数据准备与流程编排
+功能概述: 论文图表数据准备与流程编排（Figure 1–5）
 ================================================================================
 
 【职责说明】
@@ -13,14 +13,30 @@
     ★ 若需修改绘图样式、颜色、字号、图幅大小，请编辑：
       code/pipeline/paper_plot_functions.py
 
+【Figure 5 说明（新版：双模块评分验证）】
+    Figure 5 已从单一 signature score 升级为双模块评分体系：
+      · Fig.5A: CHC20 免疫模块空间评分（immune_signature_score 投影到空间坐标）
+      · Fig.5B: CHC20 基质/ECM 模块空间评分（stromal_ECM_signature_score 投影）
+      · Fig.5C: CHC20 组合 niche score（z_immune + z_stromal，反映免疫抑制微环境）
+      · Fig.5D: HCC4R vs CHC20 combined niche score 分布对比（小提琴+箱线）
+
+    模块基因来源（优先级由高到低）：
+      1. ranked_genes_csv 中存在 module 列（"immune"/"stromal"/"ecm"）→ 自动读取
+      2. 使用脚本内预设的先验基因列表（_IMMUNE_GENES_DEFAULT / _STROMAL_GENES_DEFAULT）
+
+    输出 CSV 文件：
+      fig5_dual_module_scores_HCC4R.csv  — HCC4R 三列评分（免疫/基质/组合）
+      fig5_dual_module_scores_CHC20.csv  — CHC20 三列评分（免疫/基质/组合）
+      fig5_immune_genes_used_CHC20.txt   — CHC20 实际匹配到的免疫模块基因
+      fig5_stromal_genes_used_CHC20.txt  — CHC20 实际匹配到的基质模块基因
+
 【上游依赖】
-    results/HCC4R/spatial_niche/spatial_niche_scores.csv         (Step 2)
+    results/HCC4R/spatial_niche/spatial_niche_scores.csv                 (Step 2)
     results/HCC4R/spatial_niche/immunosuppressive_niche_signature_genes_ranked.csv
-    results/HCC4R/adata_vis_post.h5ad                            (Step 1)
-    results/HCC4R/adata_sc_post.h5ad                             (Step 1)
-    results/CHC20/adata_vis_post.h5ad                            (可选，Figure 5)
+    results/HCC4R/adata_vis_post.h5ad                                    (Step 1)
+    results/HCC4R/adata_sc_post.h5ad                                     (Step 1)
+    results/CHC20/adata_vis_post.h5ad                            (可选，Figure 5A/5B/5C)
     results/HCC4R/spatial_niche/immunosuppressive_niche_signature_genes.txt
-    results/CHC20/adata_vis_post.h5ad                            (Figure 5A/5B signature projection)
 
 【使用方式】
     # 先运行 Step 1 + Step 2（以 HCC4R 为主）：
@@ -62,6 +78,13 @@ from paper_plot_functions import (  # noqa: E402
     plot_fig4A_volcano,
     plot_fig4B_niche_marker_heatmap,
     plot_fig4C_pathway_bubble,
+    # ── Figure 5 新版：双模块评分 ──────────────────────────────────
+    compute_dual_module_scores,
+    plot_fig5A_immune_spatial,
+    plot_fig5B_stromal_spatial,
+    plot_fig5C_combined_niche_spatial,
+    plot_fig5D_comparison_violin,
+    # ── Figure 5 旧版（向后兼容）───────────────────────────────────
     compute_signature_score,
     plot_fig5A_signature_projection,
     plot_fig5B_validation_violin,
@@ -393,77 +416,160 @@ def main() -> int:
         logging.warning("HCC4R data not available; skipping Figure 4.")
 
     # ============================================================
-    # ── Figure 5 ──────────────────────────────────────────────
+    # ── Figure 5（新版：双模块评分验证）─────────────────────────
     # ============================================================
     logging.info("=== Figure 5 ===")
 
-    signature_genes = _load_signature_genes(args, ranked_genes_csv)
-    hcc4r_signature_df: Optional[pd.DataFrame] = None
-    chc20_signature_df: Optional[pd.DataFrame] = None
-    hcc4r_matched_genes: list[str] = []
-    chc20_matched_genes: list[str] = []
+    # ── 从签名基因文件中拆分免疫模块 / 基质模块基因 ──────────────
+    # 规则：先尝试从 ranked_genes_csv 读取 module 列（immune/stromal）；
+    #       若不存在 module 列，则用预设的先验基因列表作为两个子模块。
+    def _split_module_genes(
+        ranked_csv: Path,
+    ) -> tuple[list[str], list[str]]:
+        """从 ranked CSV 中拆分免疫/基质模块基因，或返回预设列表。"""
+        # ★ 预设先验基因：可在此直接修改
+        _IMMUNE_GENES_DEFAULT = [
+            "FOXP3", "IL2RA", "CTLA4", "TIGIT", "IKZF2", "TNFRSF18",
+            "IL10", "TGFB1", "PDCD1", "LAG3", "HAVCR2", "ENTPD1",
+            "CD163", "MRC1", "ARG1", "CCL22", "CCL17", "VSIR",
+            "IDO1", "IDO2", "CXCL12",
+        ]
+        _STROMAL_GENES_DEFAULT = [
+            "FAP", "ACTA2", "POSTN", "COL1A1", "COL1A2", "COL3A1",
+            "COL4A1", "VCAN", "FN1", "LOXL2", "THBS2", "SPP1",
+            "MMP2", "MMP9", "MMP11", "SPARC", "LUM", "DCN",
+            "PDGFRA", "PDGFRB", "PECAM1",
+        ]
+        if ranked_csv.exists():
+            try:
+                ranked = pd.read_csv(ranked_csv)
+                if "module" in ranked.columns and "gene" in ranked.columns:
+                    immune_genes = (
+                        ranked.loc[ranked["module"].str.lower() == "immune", "gene"]
+                        .dropna().str.strip().tolist()
+                    )
+                    stromal_genes = (
+                        ranked.loc[ranked["module"].str.lower().isin(["stromal", "ecm", "stroma"]),
+                                   "gene"]
+                        .dropna().str.strip().tolist()
+                    )
+                    if immune_genes and stromal_genes:
+                        logging.info(
+                            "Module genes loaded from ranked CSV: "
+                            "immune=%d, stromal=%d",
+                            len(immune_genes), len(stromal_genes),
+                        )
+                        return immune_genes, stromal_genes
+            except Exception as _e:
+                logging.warning("Could not parse module column from ranked CSV: %s", _e)
 
-    if signature_genes and hcc4r_adata is not None:
-        hcc4r_score, hcc4r_matched_genes = compute_signature_score(
-            hcc4r_adata, signature_genes, score_name="hcc4r_signature_score"
+        logging.info(
+            "Using preset module gene lists: immune=%d, stromal=%d",
+            len(_IMMUNE_GENES_DEFAULT), len(_STROMAL_GENES_DEFAULT),
         )
-        if not hcc4r_score.empty:
-            hcc4r_signature_df = pd.DataFrame({
-                "spot_id": hcc4r_score.index,
-                "sample": "HCC4R",
-                "hcc4r_signature_score": hcc4r_score.to_numpy(dtype=float),
-            })
+        return _IMMUNE_GENES_DEFAULT, _STROMAL_GENES_DEFAULT
 
-    if signature_genes and chc20_adata is not None:
-        chc20_score, chc20_matched_genes = compute_signature_score(
-            chc20_adata, signature_genes, score_name="hcc4r_signature_score"
+    immune_genes, stromal_genes = _split_module_genes(ranked_genes_csv)
+
+    # ── HCC4R 双模块评分（用于 Fig.5D 对比）──────────────────────
+    hcc4r_combined_score: pd.Series = pd.Series(dtype=float)
+    if hcc4r_adata is not None:
+        logging.info("Computing dual-module scores for HCC4R (discovery)...")
+        (hcc4r_immune, hcc4r_stromal, hcc4r_combined_score,
+         hcc4r_m_immune, hcc4r_m_stromal) = compute_dual_module_scores(
+            hcc4r_adata, immune_genes, stromal_genes,
         )
-        if not chc20_score.empty:
-            chc20_signature_df = pd.DataFrame({
-                "spot_id": chc20_score.index,
-                "sample": "CHC20",
-                "hcc4r_signature_score": chc20_score.to_numpy(dtype=float),
-            })
+        if not hcc4r_combined_score.empty:
+            # 保存 HCC4R 双模块评分 CSV（供后续分析复用）
+            hcc4r_module_csv = out_dir / "fig5_dual_module_scores_HCC4R.csv"
+            pd.DataFrame({
+                "spot_id":                  hcc4r_combined_score.index,
+                "sample":                   "HCC4R",
+                "immune_signature_score":   hcc4r_immune.reindex(hcc4r_combined_score.index),
+                "stromal_ECM_signature_score": hcc4r_stromal.reindex(hcc4r_combined_score.index),
+                "immune_stromal_niche_score": hcc4r_combined_score.to_numpy(dtype=float),
+            }).to_csv(hcc4r_module_csv, index=False)
+            logging.info("Saved HCC4R dual-module scores: %s", hcc4r_module_csv)
+        else:
+            logging.warning("HCC4R combined score is empty; Fig.5D will be skipped.")
+    else:
+        logging.warning("HCC4R AnnData not available; skipping HCC4R dual-module scores.")
 
-            logging.info("Figure 5A: HCC4R-derived niche signature projected onto CHC20...")
-            plot_fig5A_signature_projection(
-                chc20_adata, chc20_score, out_dir=out_dir,
-                signature_name="HCC4R-derived niche signature",
-                matched_genes=chc20_matched_genes, dpi=dpi,
+    # ── CHC20 双模块评分 + 空间投影图（Fig.5A / 5B / 5C）────────
+    chc20_combined_score: pd.Series = pd.Series(dtype=float)
+    if chc20_adata is not None:
+        logging.info("Computing dual-module scores for CHC20 (validation)...")
+        (chc20_immune, chc20_stromal, chc20_combined_score,
+         chc20_m_immune, chc20_m_stromal) = compute_dual_module_scores(
+            chc20_adata, immune_genes, stromal_genes,
+        )
+
+        if not chc20_immune.empty:
+            logging.info("Figure 5A: CHC20 immune module spatial score...")
+            plot_fig5A_immune_spatial(
+                chc20_adata, chc20_immune, out_dir=out_dir,
+                matched_genes=chc20_m_immune, dpi=dpi,
             )
         else:
-            logging.warning("CHC20 has too few HCC4R signature genes; skipping Figure 5A.")
+            logging.warning("CHC20 immune score empty; skipping Figure 5A.")
+
+        if not chc20_stromal.empty:
+            logging.info("Figure 5B: CHC20 stromal/ECM module spatial score...")
+            plot_fig5B_stromal_spatial(
+                chc20_adata, chc20_stromal, out_dir=out_dir,
+                matched_genes=chc20_m_stromal, dpi=dpi,
+            )
+        else:
+            logging.warning("CHC20 stromal score empty; skipping Figure 5B.")
+
+        if not chc20_combined_score.empty:
+            logging.info("Figure 5C: CHC20 combined immune-stromal niche score...")
+            plot_fig5C_combined_niche_spatial(
+                chc20_adata, chc20_combined_score, out_dir=out_dir, dpi=dpi,
+            )
+            # 保存 CHC20 双模块评分 CSV
+            chc20_module_csv = out_dir / "fig5_dual_module_scores_CHC20.csv"
+            pd.DataFrame({
+                "spot_id":                     chc20_combined_score.index,
+                "sample":                      "CHC20",
+                "immune_signature_score":      chc20_immune.reindex(chc20_combined_score.index),
+                "stromal_ECM_signature_score": chc20_stromal.reindex(chc20_combined_score.index),
+                "immune_stromal_niche_score":  chc20_combined_score.to_numpy(dtype=float),
+            }).to_csv(chc20_module_csv, index=False)
+            logging.info("Saved CHC20 dual-module scores: %s", chc20_module_csv)
+
+            # 保存使用的基因列表
+            (out_dir / "fig5_immune_genes_used_CHC20.txt").write_text(
+                "\n".join(chc20_m_immune), encoding="utf-8"
+            )
+            (out_dir / "fig5_stromal_genes_used_CHC20.txt").write_text(
+                "\n".join(chc20_m_stromal), encoding="utf-8"
+            )
+        else:
+            logging.warning("CHC20 combined score empty; skipping Figure 5C.")
     else:
         logging.warning(
-            "Missing data for Figure 5A. Need HCC4R signature genes and CHC20 adata_vis_post.h5ad."
+            "CHC20 AnnData not available. To generate Figure 5A/5B/5C, provide:\n"
+            "  --chc20-adata results/CHC20/adata_vis_post.h5ad"
         )
 
-    if hcc4r_signature_df is not None and chc20_signature_df is not None:
-        signature_score_csv = out_dir / "fig5_signature_scores_HCC4R_CHC20.csv"
-        pd.concat([hcc4r_signature_df, chc20_signature_df], ignore_index=True).to_csv(
-            signature_score_csv, index=False
-        )
-        logging.info("Saved Figure 5 signature scores: %s", signature_score_csv)
-
-        used_genes = [g for g in signature_genes if g in set(chc20_matched_genes)]
-        if not used_genes:
-            used_genes = chc20_matched_genes
-        (out_dir / "fig5_signature_genes_used_CHC20.txt").write_text(
-            "\n".join(used_genes), encoding="utf-8"
-        )
-
-        logging.info("Figure 5B: HCC4R vs CHC20 signature score distribution...")
-        plot_fig5B_validation_violin(
-            hcc4r_signature_df, chc20_signature_df,
+    # ── Fig.5D: HCC4R vs CHC20 combined niche score 对比小提琴图 ──
+    if not hcc4r_combined_score.empty and not chc20_combined_score.empty:
+        logging.info("Figure 5D: HCC4R vs CHC20 combined niche score comparison...")
+        plot_fig5D_comparison_violin(
+            hcc4r_combined_score, chc20_combined_score,
             out_dir=out_dir, dpi=dpi,
         )
     else:
         logging.warning(
-            "Missing HCC4R or CHC20 signature score; skipping Figure 5B."
+            "HCC4R or CHC20 combined score empty; skipping Figure 5D.\n"
+            "  HCC4R combined empty: %s | CHC20 combined empty: %s",
+            hcc4r_combined_score.empty,
+            chc20_combined_score.empty,
         )
 
-    # 5C: 敏感性分析 + 参数扫描（直接读取 Step 2 输出的 CSV）
-    logging.info("Figure 5C: Sensitivity analysis...")
+    # ── 敏感性分析（旧版 Fig.5C 功能，保留为补充图）──────────────
+    logging.info("Figure 5-Supplement: Sensitivity analysis...")
     plot_fig5C_sensitivity(args.hcc4r_niche_dir, out_dir, dpi=dpi)
 
     # ============================================================

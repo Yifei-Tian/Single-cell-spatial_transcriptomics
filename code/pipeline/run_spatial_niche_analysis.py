@@ -47,21 +47,24 @@
                  【解决方案】引入检出率（Fraction of spots）作为补充维度：
                    · frac_high / frac_low：各组中检出该基因（表达>0）的 spot 比例；
                    · delta_frac = frac_high - frac_low：检出率差值；
-                   · composite_score = 0.5×norm(log2FC) + 0.5×norm(delta_frac)：综合排序；
-                 Layer 1 - Wilcoxon + BH-FDR + 综合排序：
-                   筛选条件：FDR<0.05 且（log2FC>0.5 OR delta_frac>0.10）；
-                   输出新列：frac_high / frac_low / delta_frac / composite_score；
-                 Layer 2 - 先验功能基因集 AUC 检验（Treg/TAM/CAF 三组）：
-                   增加 delta_frac 列；AUC>0.6 且 delta_frac>0.05 的先验基因强制合并；
-                  Layer 3 - Gini Index 特异性评分（局灶性高表达稀有免疫基因检测）：
-                    Gini>0.3 且 log2FC>0（阈值由 0.5 降至 0.3，覆盖 FOXP3 等稀有基因）；
-                 绘制火山图（FC vs FDR）+ 检出率散点图（FC vs delta_frac）；
+      · signature_rank_score = 0.35×minmax(log2FC) + 0.35×minmax(delta_frac) + 0.30×minmax(AUC)；
+    Layer 1 - Wilcoxon + BH-FDR + AUC + signature_rank_score 综合排序：
+      筛选条件：FDR<0.1 且 AUC>0.60 且（log2FC>0.3 OR delta_frac>0.10）；
+      若满足条件基因 < 80 个，放宽至 FDR<0.2 且 AUC>0.55 且（FC>0.2 OR Δfrac>0.05）；
+      过滤非特异性基因（housekeeping/ribosomal/mitochondrial/hemoglobin/cell-cycle/
+        broad inflammation/tissue damage）；
+      输出新列：frac_high / frac_low / delta_frac / auc / signature_rank_score；
+    Layer 2 - 先验功能基因集 AUC 检验（Treg/TAM/CAF 三组）：
+      增加 delta_frac 列；AUC>0.6 且 delta_frac>0.05 的先验基因强制合并（排除非特异性基因）；
+    Layer 3 - Gini Index 特异性评分（局灶性高表达稀有免疫基因检测）：
+      Gini>0.3 且 log2FC>0（排除非特异性基因）；
+      绘制火山图（FC vs FDR）+ 检出率散点图（FC vs delta_frac）；
                【修复说明】原 resolution × quantile 扫描存在根本缺陷——Leiden
                resolution 仅决定聚类粒度，不影响 niche_score 数值，导致所有列
                DEG 结果完全相同，热图无意义。改为 k × quantile 扫描，k（kNN
                邻居数）直接影响邻域组成向量，进而影响 niche_score 和 DEG 结果：
                  · 纵轴：k（8 / 10 / 15 / 20 / 25）
-                 · 颜色：FDR<0.05 且 log2FC>0.5 的 DEG 数量
+                 · 颜色：FDR<0.1 且 AUC>0.60 且 FC>0.3 的 DEG 数量
                选参标准：颜色最深且处于"高原"区域（与相邻格子结果相近）的
                参数组合为推荐；若主流程参数（k=15, q=0.80）位于高原区，则合理。
 
@@ -84,7 +87,8 @@
       immunosuppressive_niche_signature_genes_ranked.csv - Layer 1 签名基因排名表
                                                            列：gene / mean_high / mean_low /
                                                                log2_fc / frac_high / frac_low /
-                                                               delta_frac / composite_score /
+                                                               delta_frac / auc /
+                                                               signature_rank_score /
                                                                pvalue / fdr
       immunosuppressive_niche_signature_genes.txt        - 签名基因列表（TCGA 投影接口）
       prior_gene_set_auc.csv                             - Layer 2 先验基因集 AUC 检验结果
@@ -1573,15 +1577,20 @@ def _rank_niche_genes(
     差异更具生物学意义，且不受稀释效应影响。
 
     【三层筛选策略（并行运行）】
-      Layer 1（Wilcoxon + FDR + 综合排序）：
+      Layer 1（Wilcoxon + FDR + AUC + signature_rank_score 综合排序）：
         - 对每个基因做 Mann-Whitney U 检验（等价于 Wilcoxon 秩和检验）；
         - 用 Benjamini-Hochberg 方法对 p 值进行 FDR 校正；
         - 新增 frac_high / frac_low / delta_frac（检出率及其差值）；
-        - 综合排序分 = 0.5 × norm(log2FC) + 0.5 × norm(delta_frac)，
-          使低均值但高富集度的基因（如 FOXP3）也能进入 Top-N；
-        - 主筛选条件：FDR < 0.05 且（log2FC > 0.5 OR delta_frac > 0.10）；
-        - 补充条件：若严格条件不足 Top-N，放宽至 FDR < 0.2 且
-                     （log2FC > 0.3 OR delta_frac > 0.05）；
+        - 计算 AUC（Mann-Whitney U 统计量标准化）用于三指标综合排序；
+        - 主筛选条件：FDR < 0.1 且 AUC > 0.60 且（log2FC > 0.3 OR delta_frac > 0.10）；
+        - 若满足条件的基因少于 80 个，放宽至 FDR < 0.2 且 AUC > 0.55 且
+                                     （log2FC > 0.2 OR delta_frac > 0.05）；
+        - 排序分 signature_rank_score =
+              0.35 × minmax(log2FC)
+            + 0.35 × minmax(delta_frac)
+            + 0.30 × minmax(AUC)；
+        - 过滤非特异性基因（housekeeping、核糖体、线粒体、血红蛋白、细胞周期、
+          广谱炎症、组织损伤/应激基因）；
         - 产出：immunosuppressive_niche_signature_genes_ranked.csv（含新列）
                 + niche_signature_volcano.png（FC vs -log10 FDR 火山图）
                 + niche_fraction_scatter.png（delta_frac vs log2FC 散点图）
@@ -1589,7 +1598,7 @@ def _rank_niche_genes(
       Layer 2（先验功能基因集 AUC + Fraction 检验）：
         - 对 PRIOR_GENE_SETS 中的三组目标基因（Treg/TAM/CAF）分别做检验；
         - 报告每个基因的 AUC、p 值（FDR 校正）、均值表达量和检出率差值；
-        - AUC > 0.6 且 FDR < 0.05（或 delta_frac > 0.10）视为有意义的
+        - AUC > 0.6 且 FDR < 0.1（或 delta_frac > 0.10）视为有意义的
           niche 标志基因；
         - 满足条件的先验基因强制合并进 Layer 1 结果（补充入 Top-N）；
         - 产出：prior_gene_set_auc.csv
@@ -1613,8 +1622,8 @@ def _rank_niche_genes(
     ----
     pd.DataFrame，列：
       gene / mean_high / mean_low / log2_fc / frac_high / frac_low /
-      delta_frac / composite_score / pvalue / fdr
-    按 composite_score 降序（FDR < 0.05 或 delta_frac > 0.10 的基因优先）。
+      delta_frac / auc / signature_rank_score / pvalue / fdr
+    按 signature_rank_score 降序。
     DataFrame.attrs 额外包含：
       "prior_auc_df" : 先验基因集 AUC 检验结果 DataFrame
       "gini_df"      : Gini Index 评分 DataFrame（niche_high 子集）
@@ -1627,7 +1636,7 @@ def _rank_niche_genes(
         empty = pd.DataFrame(columns=[
             "gene", "mean_high", "mean_low", "log2_fc",
             "frac_high", "frac_low", "delta_frac",
-            "composite_score", "pvalue", "fdr",
+            "auc", "signature_rank_score", "pvalue", "fdr",
         ])
         empty.attrs["prior_auc_df"] = pd.DataFrame()
         empty.attrs["gini_df"] = pd.DataFrame()
@@ -1644,9 +1653,10 @@ def _rank_niche_genes(
     frac_low  = (low_expr  > 0).mean(axis=0)  # niche_low  组中检出该基因的 spot 比例
     delta_frac = frac_high - frac_low          # 检出率差值（正值表示 niche_high 中更多 spot 能检出）
 
-    # ── Layer 1：log2FC + Wilcoxon + FDR ──────────────────────────────────────
+    # ── Layer 1：log2FC + Wilcoxon + FDR + AUC ────────────────────────────────
     log2fc = np.log2((mean_high + 1.0) / (mean_low + 1.0))
     pvalues = np.full(len(expr.columns), 1.0)
+    auc_arr = np.full(len(expr.columns), 0.5)
     block_high_n = block_low_n = None
     test_high_expr = high_expr
     test_low_expr = low_expr
@@ -1674,6 +1684,9 @@ def _rank_niche_genes(
     elif test_mode != "spot_mwu":
         raise ValueError(f"Unknown test_mode: {test_mode}")
 
+    n_high_test = len(test_high_expr)
+    n_low_test  = len(test_low_expr)
+
     # 候选基因：log2FC > 0.1 OR delta_frac > 0.05（兼顾高表达基因和高富集基因）
     candidate_mask = (log2fc.to_numpy() > 0.1) | (delta_frac.to_numpy() > 0.05)
     candidate_genes = expr.columns[candidate_mask].tolist()
@@ -1682,8 +1695,9 @@ def _rank_niche_genes(
         test_mode,
         len(candidate_genes),
     )
-    for i, gene in enumerate(candidate_genes):
-        gene_idx = list(expr.columns).index(gene)
+    gene_col_list = list(expr.columns)
+    for gene in candidate_genes:
+        gene_idx = gene_col_list.index(gene)
         h_vals = test_high_expr[gene].to_numpy()
         l_vals = test_low_expr[gene].to_numpy()
         if len(h_vals) < 3 or len(l_vals) < 3:
@@ -1691,17 +1705,17 @@ def _rank_niche_genes(
         if h_vals.std() == 0 and l_vals.std() == 0:
             continue
         try:
-            _, p = scipy_stats.mannwhitneyu(h_vals, l_vals, alternative="greater")
+            stat, p = scipy_stats.mannwhitneyu(h_vals, l_vals, alternative="greater")
             pvalues[gene_idx] = p
+            auc_arr[gene_idx] = stat / (len(h_vals) * len(l_vals))
         except Exception:
             pass
 
     _, fdr, _, _ = multipletests(pvalues, method="fdr_bh")
 
-    # ── 综合排序分（composite_score）─────────────────────────────────────────
-    # 同时考虑 log2FC（表达量倍数差异）和 delta_frac（检出率差异），
-    # 使 FOXP3 等低表达但高富集的基因也能获得合理排名。
-    # Min-Max 归一化到 [0, 1] 再各赋 0.5 权重。
+    # ── signature_rank_score 排序分 ───────────────────────────────────────────
+    # 三维 Min-Max 归一化后加权求和：
+    #   0.35 × minmax(log2FC) + 0.35 × minmax(delta_frac) + 0.30 × minmax(AUC)
     log2fc_arr     = log2fc.to_numpy()
     delta_frac_arr = delta_frac.to_numpy()
 
@@ -1709,38 +1723,126 @@ def _rank_niche_genes(
         lo, hi = v.min(), v.max()
         return (v - lo) / (hi - lo + 1e-12)
 
-    composite = 0.5 * _minmax_norm(log2fc_arr) + 0.5 * _minmax_norm(delta_frac_arr)
+    signature_rank_score = (
+        0.35 * _minmax_norm(log2fc_arr)
+        + 0.35 * _minmax_norm(delta_frac_arr)
+        + 0.30 * _minmax_norm(auc_arr)
+    )
 
     ranked = pd.DataFrame({
-        "gene":            expr.columns.tolist(),
-        "mean_high":       mean_high.to_numpy(),
-        "mean_low":        mean_low.to_numpy(),
-        "log2_fc":         log2fc_arr,
-        "frac_high":       frac_high.to_numpy(),
-        "frac_low":        frac_low.to_numpy(),
-        "delta_frac":      delta_frac_arr,
-        "composite_score": composite,
-        "pvalue":          pvalues,
-        "fdr":             fdr,
+        "gene":                 expr.columns.tolist(),
+        "mean_high":            mean_high.to_numpy(),
+        "mean_low":             mean_low.to_numpy(),
+        "log2_fc":              log2fc_arr,
+        "frac_high":            frac_high.to_numpy(),
+        "frac_low":             frac_low.to_numpy(),
+        "delta_frac":           delta_frac_arr,
+        "auc":                  auc_arr,
+        "signature_rank_score": signature_rank_score,
+        "pvalue":               pvalues,
+        "fdr":                  fdr,
     })
 
-    # 主签名基因：FDR < 0.05 且（log2FC > 0.5 OR delta_frac > 0.10）
-    sig_strict = ranked[
-        (ranked["fdr"] < 0.05) &
-        ((ranked["log2_fc"] > 0.5) | (ranked["delta_frac"] > 0.10))
-    ]
-    sig_strict = sig_strict.sort_values("composite_score", ascending=False)
-
-    # 若严格条件下不足 top_n，放宽至 FDR < 0.2 且（log2FC > 0.3 OR delta_frac > 0.05）
-    if len(sig_strict) < top_n:
-        loose = ranked[
-            (ranked["fdr"] < 0.2) &
-            ((ranked["log2_fc"] > 0.3) | (ranked["delta_frac"] > 0.05))
+    # ── 非特异性基因过滤 ──────────────────────────────────────────────────────
+    # 过滤掉在任何 niche 背景下都会富集的基因：管家基因、核糖体基因、线粒体基因、
+    # 血红蛋白基因、细胞周期基因、广谱炎症基因和组织损伤/应激基因。
+    # 过滤后的基因列表才用作 CHC20 验证和大队列生存分析依据。
+    NON_SPECIFIC_GENES: set[str] = set(
+        # ── 核糖体蛋白基因（Ribosomal protein genes） ────────────────────────
+        # 以 RPS/RPL 开头的基因在几乎所有活跃细胞中高表达，缺乏 niche 特异性
+        [
+            g for g in ranked["gene"] if str(g).startswith(("RPS", "RPL", "MRPS", "MRPL"))
         ]
-        loose = loose.sort_values("composite_score", ascending=False)
-        sig_strict = pd.concat([sig_strict, loose]).drop_duplicates("gene")
+        # ── 线粒体基因（Mitochondrial genes） ───────────────────────────────
+        + [g for g in ranked["gene"] if str(g).startswith("MT-")]
+        # ── 血红蛋白基因（Hemoglobin genes） ────────────────────────────────
+        + ["HBA1", "HBA2", "HBB", "HBD", "HBE1", "HBG1", "HBG2", "HBM", "HBQ1", "HBZ"]
+        # ── 管家基因（Housekeeping genes，核心代谢/转录/翻译相关） ─────────
+        + [
+            "ACTB", "ACTG1", "GAPDH", "PGAM1", "LDHA", "LDHB",
+            "TUBB", "TUBA1A", "TUBA1B", "TUBA4A",
+            "EEF1A1", "EEF1B2", "EEF2",
+            "HSPA1A", "HSPA1B", "HSPA8", "HSPB1", "HSP90AA1", "HSP90AB1",
+            "CALM1", "CALM2", "CALM3",
+            "B2M", "UBB", "UBC",
+            "HNRNPA1", "HNRNPA2B1", "HNRNPC", "HNRNPK",
+            "MALAT1", "NEAT1",
+        ]
+        # ── 细胞周期基因（Cell-cycle genes） ────────────────────────────────
+        + [
+            "MKI67", "TOP2A", "CDK1", "CCNB1", "CCNB2", "CCND1", "CCNA2",
+            "PCNA", "MCM2", "MCM3", "MCM4", "MCM5", "MCM6", "MCM7",
+            "CDC20", "CDC6", "CDCA8", "CDCA3",
+            "AURKA", "AURKB", "PLK1", "BUB1", "BUB1B",
+            "TYMS", "TK1", "PTTG1", "UBE2C", "UBE2S",
+            "STMN1", "BIRC5",
+        ]
+        # ── 广谱炎症基因（Broad inflammation genes，在任何炎症环境中均可富集） ─
+        + [
+            "IL6", "IL1A", "IL1B", "TNF", "CXCL8", "CXCL1", "CXCL2",
+            "CCL2", "CCL3", "CCL4", "CCL5",
+            "S100A8", "S100A9", "S100A6", "S100A4",
+            "LYZ", "FTH1", "FTL",
+            "CXCR4",
+        ]
+        # ── 组织损伤/应激基因（Tissue damage/stress genes） ─────────────────
+        + [
+            "FOSB", "FOS", "JUN", "JUNB", "JUND", "ATF3",
+            "EGR1", "EGR2",
+            "KRT8", "KRT18", "KRT19", "KRT7",
+            "VIM",
+            "CLU", "APOE",
+        ]
+    )
+    filtered_mask = ~ranked["gene"].isin(NON_SPECIFIC_GENES)
+    n_before = len(ranked)
+    ranked_filtered = ranked[filtered_mask].copy()
+    logging.info(
+        "Non-specific gene filter: %d genes removed; %d genes remaining.",
+        n_before - len(ranked_filtered),
+        len(ranked_filtered),
+    )
 
-    result = sig_strict.head(top_n).reset_index(drop=True)
+    # ── 主筛选条件（FDR < 0.1 AND AUC > 0.60 AND (log2FC > 0.3 OR delta_frac > 0.10)） ──
+    STRICT_FDR       = 0.1
+    STRICT_AUC       = 0.60
+    STRICT_FC        = 0.3
+    STRICT_DFRAC     = 0.10
+    LOOSE_FDR        = 0.2
+    LOOSE_AUC        = 0.55
+    LOOSE_FC         = 0.2
+    LOOSE_DFRAC      = 0.05
+    MIN_GENES_THRESH = 80
+
+    def _apply_filter(df: pd.DataFrame, fdr_thr: float, auc_thr: float,
+                      fc_thr: float, dfrac_thr: float) -> pd.DataFrame:
+        return df[
+            (df["fdr"] < fdr_thr)
+            & (df["auc"] > auc_thr)
+            & ((df["log2_fc"] > fc_thr) | (df["delta_frac"] > dfrac_thr))
+        ].sort_values("signature_rank_score", ascending=False)
+
+    sig = _apply_filter(ranked_filtered, STRICT_FDR, STRICT_AUC, STRICT_FC, STRICT_DFRAC)
+    logging.info(
+        "Signature genes (strict: FDR<%.2f, AUC>%.2f, FC>%.2f or Δfrac>%.2f): %d",
+        STRICT_FDR, STRICT_AUC, STRICT_FC, STRICT_DFRAC, len(sig),
+    )
+
+    # 若严格条件下不足 MIN_GENES_THRESH（80）个，放宽阈值
+    if len(sig) < MIN_GENES_THRESH:
+        logging.info(
+            "Fewer than %d genes with strict criteria; relaxing thresholds "
+            "(FDR<%.2f, AUC>%.2f, FC>%.2f or Δfrac>%.2f).",
+            MIN_GENES_THRESH, LOOSE_FDR, LOOSE_AUC, LOOSE_FC, LOOSE_DFRAC,
+        )
+        loose = _apply_filter(ranked_filtered, LOOSE_FDR, LOOSE_AUC, LOOSE_FC, LOOSE_DFRAC)
+        sig = pd.concat([sig, loose]).drop_duplicates("gene")
+        sig = sig.sort_values("signature_rank_score", ascending=False)
+        logging.info(
+            "Signature genes (relaxed): %d", len(sig),
+        )
+
+    result = sig.head(top_n).reset_index(drop=True)
 
     # ── Layer 2：先验功能基因集 AUC 检验 ──────────────────────────────────────
     prior_rows = []
@@ -1795,11 +1897,11 @@ def _rank_niche_genes(
     if not prior_df.empty:
         n_sig_prior = int(
             ((prior_df.get("auc", pd.Series()) > 0.6) &
-             ((prior_df.get("fdr", pd.Series(1.0)) < 0.05) |
+             ((prior_df.get("fdr", pd.Series(1.0)) < 0.1) |
               (prior_df.get("delta_frac", pd.Series(0.0)) > 0.10))).sum()
         )
     logging.info(
-        "Prior gene set results: %d genes tested, %d with AUC>0.6 & (FDR<0.05 or delta_frac>0.10)",
+        "Prior gene set results: %d genes tested, %d with AUC>0.6 & (FDR<0.1 or delta_frac>0.10)",
         len(prior_df),
         n_sig_prior,
     )
@@ -1807,34 +1909,38 @@ def _rank_niche_genes(
     # ── Layer 2 → 强制合并入 result：将满足条件的先验基因补充入签名列表 ─────
     # 解决问题：FOXP3 等目标基因可能因 log2FC 过低而无法通过 Layer 1 筛选，
     # 但其 delta_frac（检出率差值）或 AUC 体现了真实的生物学富集。
-    # 在此强制将 AUC > 0.6 且 delta_frac > 0.05 的先验基因纳入最终列表。
+    # 在此强制将 AUC > 0.6 且 delta_frac > 0.05 的先验基因（且不在非特异性过滤列表中）
+    # 纳入最终列表。
     if not prior_df.empty:
         prior_sig_genes = prior_df[
             (prior_df.get("auc", pd.Series(0.0)) > 0.6) &
-            (prior_df.get("delta_frac", pd.Series(0.0)) > 0.05)
+            (prior_df.get("delta_frac", pd.Series(0.0)) > 0.05) &
+            (~prior_df["actual_gene"].isin(NON_SPECIFIC_GENES))
         ]["actual_gene"].dropna().unique().tolist()
 
         if prior_sig_genes:
             logging.info(
                 "Layer 2 forced-merge: %d prior genes will be added to signature "
-                "(AUC>0.6 & delta_frac>0.05): %s",
+                "(AUC>0.6 & delta_frac>0.05, not non-specific): %s",
                 len(prior_sig_genes),
                 ", ".join(prior_sig_genes[:10]),
             )
-            # 从 ranked 中取出这些基因的全部统计量
-            forced_rows = ranked[ranked["gene"].isin(prior_sig_genes)].copy()
+            # 从 ranked_filtered 中取出这些基因的全部统计量
+            forced_rows = ranked_filtered[ranked_filtered["gene"].isin(prior_sig_genes)].copy()
             # 合并：已在 result 中的不重复添加
             already = set(result["gene"].tolist())
             new_rows = forced_rows[~forced_rows["gene"].isin(already)]
             if not new_rows.empty:
                 result = pd.concat([result, new_rows], ignore_index=True)
-                result = result.sort_values("composite_score", ascending=False).reset_index(drop=True)
+                result = result.sort_values("signature_rank_score", ascending=False).reset_index(drop=True)
 
     # ── Layer 3：Gini Index 特异性评分 ─────────────────────────────────────────
     gini_rows = []
     high_arr = high_expr.to_numpy()
     for gene in expr.columns:
-        gene_idx = list(expr.columns).index(gene)
+        if gene in NON_SPECIFIC_GENES:
+            continue  # 非特异性基因不参与 Gini 评估
+        gene_idx = gene_col_list.index(gene)
         g_vals = high_arr[:, gene_idx]
         l2fc = float(log2fc.iloc[gene_idx])
         if l2fc <= 0:
@@ -1850,12 +1956,13 @@ def _rank_niche_genes(
     gini_df = pd.DataFrame(gini_rows).sort_values("gini", ascending=False) if gini_rows \
         else pd.DataFrame(columns=["gene", "gini", "log2_fc", "mean_high"])
     logging.info(
-        "Gini index: %d genes with Gini>0.5 and log2FC>0", len(gini_df)
+        "Gini index: %d genes with Gini>0.3 and log2FC>0 (non-specific genes excluded)", len(gini_df)
     )
 
     result.attrs["prior_auc_df"] = prior_df
     result.attrs["gini_df"] = gini_df
     result.attrs["de_test_mode"] = test_mode
+    result.attrs["non_specific_genes_filtered"] = list(NON_SPECIFIC_GENES)
     if block_high_n is not None and block_low_n is not None:
         result.attrs["niche_high_blocks"] = int(block_high_n)
         result.attrs["niche_low_blocks"] = int(block_low_n)
@@ -2357,8 +2464,11 @@ def _plot_niche_comparison(
         quantile_pct=int(args.niche_high_quantile * 100),
     )
 
-    # ── Step 14: 特征基因提取（升级版） ─────────────────────────────────────────
-    logging.info("Step 14: Extracting niche signature genes (with Wilcoxon + FDR + Gini)...")
+    # ── Step 14: 特征基因提取（三层筛选策略 + 非特异性基因过滤） ────────────────
+    logging.info(
+        "Step 14: Extracting niche signature genes "
+        "(FDR<0.1 + AUC>0.60 + FC/frac filter + non-specific gene removal)..."
+    )
     block_size = float(radius) * float(args.de_block_size_multiplier)
     block_ids = _build_spatial_block_ids(df, block_size)
     logging.info(
