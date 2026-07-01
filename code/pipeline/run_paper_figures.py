@@ -307,8 +307,7 @@ def main() -> int:
     # ============================================================
     logging.info("=== Figure 1 ===")
 
-    # 1A: 技术路线图（纯 matplotlib，无需数据文件）
-    logging.info("Figure 1A: Workflow diagram...")
+    logging.info("Figure 1A: Study workflow schematic...")
     plot_fig1A_workflow(out_dir, dpi=dpi)
 
     # 1C / 1D: 复制 Step 1 已生成的图

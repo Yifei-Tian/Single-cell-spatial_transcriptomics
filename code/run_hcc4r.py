@@ -106,6 +106,8 @@ def parse_args():
     p.add_argument("--step1-only",    action="store_true", help="仅运行 Step 1（预处理 + 反卷积）")
     p.add_argument("--step2-only",    action="store_true", help="仅运行 Step 2（空间生态位分析）")
     p.add_argument("--no-sample2",    action="store_true", help="Step 1 中跳过 CHC20 配对验证切片")
+    p.add_argument("--force-step1",   action="store_true", help="忽略 results/HCC4R 中的缓存，重新运行 Step 1 训练")
+    p.add_argument("--no-cache",      action="store_true", help="不复用 Step 1 缓存，等同于 --force-step1")
     p.add_argument("--paper-figures", action="store_true", help="在 Step 1+2 之后生成论文图表")
     p.add_argument("--figures-only",  action="store_true", help="仅生成论文图表（Step 1+2 已完成）")
     p.add_argument("--hcc4r-visium-dir", type=Path, default=PATH_SAMPLE1,
@@ -113,8 +115,25 @@ def parse_args():
     return p.parse_args()
 
 
-def run_step1(with_sample2: bool = True):
+def _has_cached_step1_outputs() -> bool:
+    """Return True when Step 1 has already produced the files needed by Step 2."""
+    required = [
+        OUTPUT_DIR / "adata_vis_post.h5ad",
+    ]
+    return all(path.exists() for path in required)
+
+
+def run_step1(with_sample2: bool = True, use_cache: bool = True):
     """运行 Step 1：预处理 + Cell2location 反卷积"""
+    if use_cache and _has_cached_step1_outputs():
+        print(
+            "[run_hcc4r] Cached Step 1 output found; skipping regression and "
+            f"Cell2location training: {OUTPUT_DIR / 'adata_vis_post.h5ad'}"
+        )
+        if with_sample2:
+            _sync_sample2_outputs()
+        return
+
     pipeline_dir = Path(__file__).parent / "pipeline"
     sys.path.insert(0, str(pipeline_dir))
     sys.path.insert(0, str(pipeline_dir.parent / "utils"))
@@ -127,6 +146,7 @@ def run_step1(with_sample2: bool = True):
         sample1_name=SAMPLE1_NAME,
         sample2_name=SAMPLE2_NAME,
         output_dir=OUTPUT_DIR,
+        use_cache=use_cache,
     )
     if with_sample2:
         _sync_sample2_outputs()
@@ -200,9 +220,15 @@ def main():
     elif args.step2_only:
         run_step2()
     elif args.step1_only:
-        run_step1(with_sample2=not args.no_sample2)
+        run_step1(
+            with_sample2=not args.no_sample2,
+            use_cache=not (args.force_step1 or args.no_cache),
+        )
     else:
-        run_step1(with_sample2=not args.no_sample2)
+        run_step1(
+            with_sample2=not args.no_sample2,
+            use_cache=not (args.force_step1 or args.no_cache),
+        )
         run_step2()
         if args.paper_figures:
             run_paper_figures(hcc4r_visium_dir=getattr(args, "hcc4r_visium_dir", None))

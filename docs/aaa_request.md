@@ -1,89 +1,27 @@
 # 需求文档
 
-仔细阅读我的项目代码，根据以下需求修改代码，删除没有必要的代码，并同步修改readme和每个代码文件最前面的介绍
+## 第一次任务
 
-1. 我目前的项目代码在 Visium spot 级别做 Mann-Whitney U / Wilcoxon rank-sum 时，p 值和 FDR 极小，将这个检验筛选 signature genes 的过程修改为
+仔细阅读我的项目代码，根据我以下的要求完成报告latex代码，并保存到./docs/report_0701.tex 中
 
-   ```
-   保留条件：
-       FDR_block < 0.1
-       and AUC_block > 0.60
-       and (log2FC > 0.3 or delta_frac > 0.10)
-   
-   排序：
-       signature_rank_score =
-           0.35 * minmax(log2FC)
-         + 0.35 * minmax(delta_frac)
-         + 0.30 * minmax(AUC)
-   ```
+1. 报告需要包含的内容和大致结构如下
+   - 第一部分：
+     1. 对我研究的疾病、使用的相关方法、相关研究领域的前沿进展的相关综述，暗示说明这个工作是非常有价值和前景的；
+     2. 介绍我的研究目标、研究意义、为什么要做这样的一个研究。
+   - 第二部分：
+     1. 详细依次介绍我的项目的结构流程和使用方法；
+     2. 在主观选择参数或者所使用方法处强调说明为什么选择这个参数或者方法，同时简单提及其他方法，说明其不合适之处。
+   - 第三部分（放入附录）
+     1. 依次介绍代码实现细节
+   - 第四部分
+     1. 参考文献列表（不用输出到latex中，直接单独输出为.bib文件，使其能够编译进入 report_0701.tex 中）
 
-   在修改保留阈值时判断一下保留的基因个数，如果小于80个的话就放松这个保留阈值。immunosuppressive_niche_signature_genes_ranked.csv 这个表格和同名的txt文件也同步更新。
+2. 以上生成的所有内容均需要在原文中引用参考文献，并给出参考文献来源，所有你输出的语句除了来源于我的项目代码本身，均来自于参考文献，严禁编造。
 
-   将筛选出来的基因过滤掉非特异性基因，例如
 
-   ```
-   housekeeping genes
-   ribosomal genes
-   mitochondrial genes
-   hemoglobin genes
-   cell-cycle genes
-   broad inflammation genes
-   tissue damage/stress genes
-   ```
 
-   过滤后的所有基因作为后续CHC20验证和大队列生存分析的依据。
+## 第二次任务
 
-2. CHC20 空间转录组数据的验证过程，目前采取的是
+根据附件中结果图和结果介绍的结构，修改 ./docs/report_0701.tex，在第二部分之后添加结果部分，要求严格按照我给出的附件中的结果图展开客观分析，结果不符合预期的需要阐述合理的原因，并给出修改优化思路和方式。
 
-   ```
-   score_i = mean(log-normalized expression of signature genes)
-   ```
-
-   不太合理，结果也不理想。将其修改为将所有保留基因分为三组*（目前没有运行得到的 signature genes 的基因结果，无法作为准确计算，你只需要完整这个结构，保证其能够正常运行，具体三组基因包含哪些我自己修改）*，按照以下规则进行 score 的计算和验证
-
-   三套 score：
-
-   ```
-   1. immune_signature_score
-   2. stromal_ECM_signature_score
-   3. immune_stromal_niche_score
-   ```
-
-   具体公式可以这样：
-
-   对每个 spot 或患者，先算 immune 模块：
-
-   ```
-   immune_score_i =
-       mean(E_ig for g in immune genes)
-   ```
-
-   再算 stromal/ECM 模块：
-
-   ```
-   stromal_score_i =
-       mean(E_ig for g in stromal/ECM genes)
-   ```
-
-   然后标准化：
-
-   ```
-   z_immune_i = z(immune_score_i)
-   z_stromal_i = z(stromal_score_i)
-   ```
-
-   最后组合成 niche score：
-
-   ```
-   immune_stromal_niche_score_i =
-       z_immune_i + z_stromal_i
-   ```
-
-   最后这个过程中生成的图片改成：
-
-   ```
-   Fig.5A: CHC20 immune module spatial score
-   Fig.5B: CHC20 stromal/ECM module spatial score
-   Fig.5C: combined immune-stromal niche score
-   Fig.5D: HCC4R vs CHC20 combined score distribution
-   ```
+所有内容均来源于结果图和参考文献（需引用到原文，并添加进入bib文件中），严禁编造和与图片不符。

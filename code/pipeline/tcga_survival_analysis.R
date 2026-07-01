@@ -473,7 +473,7 @@ script_path <- get_script_path()
 
 # 尝试使用硬编码的 Windows 开发路径；若不存在（如在其他机器运行），
 # 则自动切换为脚本所在目录的上一级目录作为项目根目录
-default_root <- "E:\\Research!!\\Codes\\Bioinformation_train\\Single-cell&spatial_transcriptomics"
+default_root <- "E:/Research!!/Codes/Bioinformation_train/Single-cell & spatial_transcriptomics"
 project_root <- if (dir.exists(default_root)) {
     normalizePath(default_root, winslash = "\\", mustWork = FALSE)
 } else {

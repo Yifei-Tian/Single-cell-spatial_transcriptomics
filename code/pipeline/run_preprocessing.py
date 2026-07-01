@@ -362,6 +362,101 @@ def plot_celltype_marker_heatmap(
 
 
 # ============================================================
+# 辅助函数：Cell2location 缓存读取
+# ============================================================
+
+def _adata_has_regression_signatures(adata_sc) -> bool:
+    return "means_per_cluster_mu_fg" in getattr(adata_sc, "varm", {})
+
+
+def _load_cached_reference_signatures(
+    output_dir: Path,
+    sample_name: str,
+    prefer_standard: bool = False,
+) -> tuple[object | None, pd.DataFrame | None]:
+    """Read cached RegressionModel posterior signatures from adata_sc_post*.h5ad."""
+    sample_path = output_dir / f"adata_sc_post_{sample_name}.h5ad"
+    standard_path = output_dir / "adata_sc_post.h5ad"
+    candidates = [standard_path, sample_path] if prefer_standard else [sample_path]
+
+    for path in candidates:
+        if not path.exists():
+            continue
+        try:
+            adata_sc_cached = sc.read_h5ad(path)
+            if not _adata_has_regression_signatures(adata_sc_cached):
+                LOGGER.info(
+                    "Cached scRNA file lacks RegressionModel signatures, ignoring: %s",
+                    path,
+                )
+                continue
+            cell_state_df = sanitize_cell_state_df(extract_cell_state_df(adata_sc_cached))
+            LOGGER.info(
+                "Loaded cached RegressionModel signatures for %s from %s (%d genes x %d cell types).",
+                sample_name,
+                path,
+                cell_state_df.shape[0],
+                cell_state_df.shape[1],
+            )
+            return adata_sc_cached, cell_state_df
+        except Exception as exc:
+            LOGGER.warning("Failed to load cached RegressionModel signatures from %s: %s", path, exc)
+    return None, None
+
+
+def _load_cached_cell2location_slice(
+    output_dir: Path,
+    sample_name: str,
+    prefer_standard: bool = False,
+) -> tuple[pd.DataFrame, object] | None:
+    """Read cached Cell2location posterior h5ad and spot proportion table if available."""
+    sample_h5ad = output_dir / f"adata_vis_post_{sample_name}.h5ad"
+    standard_h5ad = output_dir / "adata_vis_post.h5ad"
+    h5ad_candidates = [standard_h5ad, sample_h5ad] if prefer_standard else [sample_h5ad]
+
+    for h5ad_path in h5ad_candidates:
+        if not h5ad_path.exists():
+            continue
+        try:
+            adata_vis_post = sc.read_h5ad(h5ad_path)
+            if (
+                "means_cell_abundance_w_sf" not in adata_vis_post.obsm
+                and "cell_abundance" not in adata_vis_post.obsm
+            ):
+                LOGGER.info(
+                    "Cached spatial file lacks Cell2location abundance matrices, ignoring: %s",
+                    h5ad_path,
+                )
+                continue
+            if "cell_abundance" not in adata_vis_post.obsm:
+                adata_vis_post.obsm["cell_abundance"] = adata_vis_post.obsm["means_cell_abundance_w_sf"]
+
+            csv_path = output_dir / f"spot_cell_proportion_{sample_name}.csv"
+            if csv_path.exists():
+                proportion_df = pd.read_csv(csv_path)
+            else:
+                LOGGER.info(
+                    "Cached spot proportion table missing for %s; recomputing from %s.",
+                    sample_name,
+                    h5ad_path,
+                )
+                proportion_df = compute_spot_cell_proportion(
+                    adata_vis_post, abundance_key="means_cell_abundance_w_sf"
+                )
+                proportion_df.to_csv(csv_path, index=False)
+
+            LOGGER.info(
+                "Loaded cached Cell2location result for %s from %s; skipping spatial training.",
+                sample_name,
+                h5ad_path,
+            )
+            return proportion_df, adata_vis_post
+        except Exception as exc:
+            LOGGER.warning("Failed to load cached Cell2location result from %s: %s", h5ad_path, exc)
+    return None
+
+
+# ============================================================
 # 辅助函数：CHC23 独立验证
 # ============================================================
 
@@ -830,6 +925,7 @@ def main(
     sample1_name: str = SAMPLE1_NAME,
     sample2_name: str = SAMPLE2_NAME,
     output_dir: Path = OUTPUT_DIR,
+    use_cache: bool = True,
 ):
     """
     主流程：数据预处理、Treg 注释、Cell2location 反卷积。
@@ -842,6 +938,7 @@ def main(
     sample1_name  : 主分析切片名（用于文件命名），如 "CHC20" / "HCC4R"
     sample2_name  : 验证切片名，如 "CHC23" / "HCC6NR"
     output_dir    : 结果输出目录（不同数据集应传入不同路径）
+    use_cache     : 若 results 中已有后验文件，则跳过耗时训练并复用缓存
     """
     global OUTPUT_DIR, LOGGER, LOG_PATH
     OUTPUT_DIR = output_dir
@@ -864,6 +961,7 @@ def main(
     LOGGER.info("  sample1      : %s -> %s", sample1_name, path_sample1)
     LOGGER.info("  sample2      : %s -> %s", sample2_name, path_sample2)
     LOGGER.info("  output_dir   : %s", OUTPUT_DIR)
+    LOGGER.info("  use_cache    : %s", use_cache)
 
     t0 = perf_counter()
 
@@ -970,59 +1068,92 @@ def main(
     except Exception as exc:
         LOGGER.warning("Marker heatmap failed: %s", exc)
 
-    # ── Step 5: 训练主分析切片的 RegressionModel ──────────────────────────────────
-    LOGGER.info("Step 5: Training RegressionModel for %s...", sample1_name)
-    model_s1 = setup_and_train_regression_model(adata_sc_s1, regression_model_cls)
-
-    model_s1.plot_history(50)
-    history_path_s1 = output_dir / f"regression_training_history_{sample1_name}.png"
-    plt.savefig(history_path_s1, dpi=150, bbox_inches="tight")
-    plt.close()
-    LOGGER.info("%s 单细胞模型训练曲线已保存: %s", sample1_name, history_path_s1)
-
-    adata_sc_s1 = export_signatures(model_s1, adata_sc_s1)
-    cell_state_df_s1 = sanitize_cell_state_df(extract_cell_state_df(adata_sc_s1))
-
-    # ── Step 6: 主分析切片的 Cell2location 空间建模 ─────────────────────────────
-    LOGGER.info("Step 6: Running Cell2location deconvolution for %s...", sample1_name)
-    prop_s1, adata_vis_s1_post = _run_cell2location_for_slice(
-        adata_vis_raw=adata_vis_s1_sh,
-        cell_state_df=cell_state_df_s1,
-        cell2location_cls=cell2location_cls,
-        sample_name=sample1_name,
-        output_dir=output_dir,
+    # ── Step 5/6: 主分析切片 RegressionModel + Cell2location（优先复用缓存）────
+    cached_s1 = (
+        _load_cached_cell2location_slice(output_dir, sample1_name, prefer_standard=True)
+        if use_cache else None
     )
-    # 同时保存标准名称（供 run_spatial_niche_analysis.py 直接读取）
-    adata_vis_s1_post.write_h5ad(output_dir / "adata_vis_post.h5ad")
-    LOGGER.info("%s: Step 6 完成，adata_vis_post.h5ad 已保存。", sample1_name)
-
-    # ── Step 7: 验证切片独立建模（可选）─────────────────────────────────────────
-    if adata_vis_s2_sh is not None:
-        LOGGER.info("Step 7: Training RegressionModel for %s (validation)...", sample2_name)
-        model_s2 = setup_and_train_regression_model(
-            adata_sc_s2,
-            regression_model_cls,
-            max_epochs=400,
-            early_stopping_patience=50,
-            early_stopping_min_delta=5e-5,
+    if cached_s1 is not None:
+        prop_s1, adata_vis_s1_post = cached_s1
+        standard_h5ad = output_dir / "adata_vis_post.h5ad"
+        if not standard_h5ad.exists():
+            adata_vis_s1_post.write_h5ad(standard_h5ad)
+            LOGGER.info("%s cached result copied to standard path: %s", sample1_name, standard_h5ad)
+    else:
+        cached_adata_sc_s1, cell_state_df_s1 = (
+            _load_cached_reference_signatures(output_dir, sample1_name, prefer_standard=True)
+            if use_cache else (None, None)
         )
-        model_s2.plot_history(50)
-        history_path_s2 = output_dir / f"regression_training_history_{sample2_name}.png"
-        plt.savefig(history_path_s2, dpi=150, bbox_inches="tight")
-        plt.close()
-        LOGGER.info("%s 单细胞模型训练曲线已保存: %s", sample2_name, history_path_s2)
+        if cached_adata_sc_s1 is not None and cell_state_df_s1 is not None:
+            adata_sc_s1 = cached_adata_sc_s1
+            LOGGER.info("Step 5: Reusing cached RegressionModel signatures for %s.", sample1_name)
+        else:
+            LOGGER.info("Step 5: Training RegressionModel for %s...", sample1_name)
+            model_s1 = setup_and_train_regression_model(adata_sc_s1, regression_model_cls)
 
-        adata_sc_s2 = export_signatures(model_s2, adata_sc_s2)
-        cell_state_df_s2 = sanitize_cell_state_df(extract_cell_state_df(adata_sc_s2))
+            model_s1.plot_history(50)
+            history_path_s1 = output_dir / f"regression_training_history_{sample1_name}.png"
+            plt.savefig(history_path_s1, dpi=150, bbox_inches="tight")
+            plt.close()
+            LOGGER.info("%s 单细胞模型训练曲线已保存: %s", sample1_name, history_path_s1)
 
-        LOGGER.info("Step 7: Running Cell2location for %s (validation)...", sample2_name)
-        prop_s2, adata_vis_s2_post = _run_cell2location_for_slice(
-            adata_vis_raw=adata_vis_s2_sh,
-            cell_state_df=cell_state_df_s2,
+            adata_sc_s1 = export_signatures(model_s1, adata_sc_s1)
+            cell_state_df_s1 = sanitize_cell_state_df(extract_cell_state_df(adata_sc_s1))
+
+        LOGGER.info("Step 6: Running Cell2location deconvolution for %s...", sample1_name)
+        prop_s1, adata_vis_s1_post = _run_cell2location_for_slice(
+            adata_vis_raw=adata_vis_s1_sh,
+            cell_state_df=cell_state_df_s1,
             cell2location_cls=cell2location_cls,
-            sample_name=sample2_name,
+            sample_name=sample1_name,
             output_dir=output_dir,
         )
+        # 同时保存标准名称（供 run_spatial_niche_analysis.py 直接读取）
+        adata_vis_s1_post.write_h5ad(output_dir / "adata_vis_post.h5ad")
+        LOGGER.info("%s: Step 6 完成，adata_vis_post.h5ad 已保存。", sample1_name)
+
+    # ── Step 7: 验证切片独立建模（可选，优先复用缓存）─────────────────────────
+    if adata_vis_s2_sh is not None:
+        cached_s2 = (
+            _load_cached_cell2location_slice(output_dir, sample2_name)
+            if use_cache else None
+        )
+        if cached_s2 is not None:
+            prop_s2, adata_vis_s2_post = cached_s2
+        else:
+            cached_adata_sc_s2, cell_state_df_s2 = (
+                _load_cached_reference_signatures(output_dir, sample2_name)
+                if use_cache else (None, None)
+            )
+            if cached_adata_sc_s2 is not None and cell_state_df_s2 is not None:
+                adata_sc_s2 = cached_adata_sc_s2
+                LOGGER.info("Step 7: Reusing cached RegressionModel signatures for %s.", sample2_name)
+            else:
+                LOGGER.info("Step 7: Training RegressionModel for %s (validation)...", sample2_name)
+                model_s2 = setup_and_train_regression_model(
+                    adata_sc_s2,
+                    regression_model_cls,
+                    max_epochs=400,
+                    early_stopping_patience=50,
+                    early_stopping_min_delta=5e-5,
+                )
+                model_s2.plot_history(50)
+                history_path_s2 = output_dir / f"regression_training_history_{sample2_name}.png"
+                plt.savefig(history_path_s2, dpi=150, bbox_inches="tight")
+                plt.close()
+                LOGGER.info("%s 单细胞模型训练曲线已保存: %s", sample2_name, history_path_s2)
+
+                adata_sc_s2 = export_signatures(model_s2, adata_sc_s2)
+                cell_state_df_s2 = sanitize_cell_state_df(extract_cell_state_df(adata_sc_s2))
+
+            LOGGER.info("Step 7: Running Cell2location for %s (validation)...", sample2_name)
+            prop_s2, adata_vis_s2_post = _run_cell2location_for_slice(
+                adata_vis_raw=adata_vis_s2_sh,
+                cell_state_df=cell_state_df_s2,
+                cell2location_cls=cell2location_cls,
+                sample_name=sample2_name,
+                output_dir=output_dir,
+            )
     else:
         LOGGER.info("Step 7: Skipped (no sample2 provided).")
         prop_s2 = adata_vis_s2_post = None
@@ -1045,13 +1176,25 @@ def main(
         LOGGER.info("Step 8: Skipped (no sample2).")
 
     # ── Step 9: 保存共享基因列表和 scRNA AnnData ─────────────────────────────────
-    adata_sc_s1.write_h5ad(output_dir / "adata_sc_post.h5ad")
-    adata_sc_s1.write_h5ad(output_dir / f"adata_sc_post_{sample1_name}.h5ad")
+    if _adata_has_regression_signatures(adata_sc_s1):
+        adata_sc_s1.write_h5ad(output_dir / "adata_sc_post.h5ad")
+        adata_sc_s1.write_h5ad(output_dir / f"adata_sc_post_{sample1_name}.h5ad")
+    else:
+        LOGGER.info(
+            "%s scRNA object has no RegressionModel signatures; keeping existing adata_sc_post cache unchanged.",
+            sample1_name,
+        )
     (output_dir / f"shared_genes_{sample1_name}.txt").write_text(
         "\n".join(shared_genes_s1), encoding="utf-8"
     )
     if adata_sc_s2 is not None:
-        adata_sc_s2.write_h5ad(output_dir / f"adata_sc_post_{sample2_name}.h5ad")
+        if _adata_has_regression_signatures(adata_sc_s2):
+            adata_sc_s2.write_h5ad(output_dir / f"adata_sc_post_{sample2_name}.h5ad")
+        else:
+            LOGGER.info(
+                "%s scRNA object has no RegressionModel signatures; keeping existing sample2 adata_sc_post cache unchanged.",
+                sample2_name,
+            )
         (output_dir / f"shared_genes_{sample2_name}.txt").write_text(
             "\n".join(shared_genes_s2), encoding="utf-8"
         )

@@ -81,6 +81,7 @@
 """
 from __future__ import annotations
 
+import json
 import logging
 import warnings
 from pathlib import Path
@@ -106,10 +107,9 @@ warnings.filterwarnings("ignore")
 # ★ 全局配色与样式常量（修改这里来统一调整论文风格）
 # ============================================================
 
-# 主色板：深蓝-青绿-亮黄，适合空间丰度、signature score 和表达热图
 PAPER_YBP = LinearSegmentedColormap.from_list(
     "paper_ybp",
-    ["#253494", "#1FA187", "#FDE725"],
+    ["#5f30c5", "#000000", "#ffd000"],
     N=256,
 )
 
@@ -289,119 +289,104 @@ def _resolve_domain_col(spatial_df: pd.DataFrame, preferred: str = "spatial_regi
             return fallback
     return None
 
-
 # ============================================================
-# Figure 1A: 课题技术路线图
+# Figure 1A: Study workflow schematic
 # ============================================================
 
 def plot_fig1A_workflow(out_dir: Path, dpi: int = PAPER_DPI) -> None:
-    """绘制三列布局的课题技术路线图。
+    """绘制研究流程示意图。"""
+    out_dir.mkdir(parents=True, exist_ok=True)
 
-    ★ 可调参数：
-      figsize=(15, 9)     — 图幅大小
-      c_scrna / c_spatial / c_tcga — 三列主色
-      _box: w=3.0/3.6, h=0.85 — 方块宽高
-      fontsize — 各处字号
-    """
-    fig, ax = plt.subplots(figsize=(15, 9))
-    ax.set_xlim(0, 15)
-    ax.set_ylim(0, 9)
-    ax.axis("off")
-    fig.patch.set_facecolor("white")
+    steps = [
+        ("Input data", "HCC4R scRNA-seq\nHCC4R Visium\nCHC20 validation"),
+        ("Preprocessing", "QC, normalization\ncell annotation\nspatial alignment"),
+        ("Cell mapping", "cell2location\ncell abundance\nspot composition"),
+        ("Niche discovery", "spatial domains\nco-localization\nniche scores"),
+        ("Validation", "dual-module scores\nCHC20 projection\nsample comparison"),
+    ]
 
-    # ── 三列主色 ────────────────────────────────────────────
-    c_scrna   = "#007a8b"
-    c_spatial = "#f93800"
-    c_tcga    = "#ffb500"
-    c_bg      = "#f8f8f8"
+    fig, ax = plt.subplots(figsize=(12.0, 3.8))
+    ax.set_axis_off()
+    ax.set_xlim(0, 1)
+    ax.set_ylim(0, 1)
 
-    # ── 背景框 ────────────────────────────────────────────────────────
-    for x0, w, color, title in [
-        (0.2,  4.1, c_scrna,   "① scRNA-seq Reference"),
-        (5.0,  4.8, c_spatial, "② Spatial Transcriptomics"),
-        (10.5, 4.3, c_tcga,    "③ Clinical Validation"),
-    ]:
+    x_centers = np.linspace(0.10, 0.90, len(steps))
+    box_w = 0.155
+    box_h = 0.42
+    y0 = 0.34
+    colors = ["#45496a", "#7d8bae", "#4fb19d", "#edce7a", "#e5857b"]
+
+    for i, ((title, body), x, color) in enumerate(zip(steps, x_centers, colors)):
         rect = mpatches.FancyBboxPatch(
-            (x0, 0.3), w, 8.3,
-            boxstyle="round,pad=0.2",
-            facecolor=c_bg, edgecolor=color, linewidth=2.8, zorder=1,
+            (x - box_w / 2, y0),
+            box_w,
+            box_h,
+            boxstyle="round,pad=0.015,rounding_size=0.018",
+            linewidth=1.1,
+            edgecolor="#2f3348",
+            facecolor="#fbfbfd",
         )
         ax.add_patch(rect)
-        ax.text(x0 + w / 2, 8.78, title, ha="center", va="bottom",
-                fontsize=11.5, fontweight="bold", color=color)
-
-    # ── 内部方块与箭头辅助函数 ─────────────────────────────────────────
-    def _box(ax_, x, y, text, fc, w=3.0, h=0.85):
-        rect = mpatches.FancyBboxPatch(
-            (x - w / 2, y - h / 2), w, h,
-            boxstyle="round,pad=0.12",
-            facecolor=fc, edgecolor="white", linewidth=0, alpha=0.88, zorder=2,
+        ax.add_patch(
+            mpatches.Rectangle(
+                (x - box_w / 2, y0 + box_h - 0.095),
+                box_w,
+                0.095,
+                linewidth=0,
+                facecolor=color,
+                alpha=0.95,
+            )
         )
-        ax_.add_patch(rect)
-        ax_.text(x, y, text, ha="center", va="center", fontsize=8.5,
-                 color="white", fontweight="bold", zorder=3, wrap=True,
-                 multialignment="center")
+        ax.text(
+            x,
+            y0 + box_h - 0.048,
+            title,
+            ha="center",
+            va="center",
+            fontsize=10,
+            fontweight="bold",
+            color="white",
+        )
+        ax.text(
+            x,
+            y0 + 0.16,
+            body,
+            ha="center",
+            va="center",
+            fontsize=9,
+            color="#20243a",
+            linespacing=1.35,
+        )
 
-    def _arrow(ax_, x, y1, y2, color):
-        ax_.annotate("", xy=(x, y2), xytext=(x, y1),
-                     arrowprops=dict(arrowstyle="-|>", color=color, lw=1.6), zorder=3)
+        if i < len(steps) - 1:
+            ax.annotate(
+                "",
+                xy=(x_centers[i + 1] - box_w / 2 - 0.015, y0 + box_h / 2),
+                xytext=(x + box_w / 2 + 0.015, y0 + box_h / 2),
+                arrowprops=dict(arrowstyle="-|>", lw=1.4, color="#4a4f68"),
+            )
 
-    # ── scRNA-seq 左列 ──────────────────────────────────────────────
-    scrna_x = 2.25
-    for y, text in [
-        (7.2, "Liver Cancer scRNA-seq\n(Multi-patient Atlas)"),
-        (5.7, "Cell Clustering &\nType Annotation"),
-        (4.2, "Treg Subcluster\nIdentification (FOXP3⁺)"),
-        (2.7, "Cell-type Reference\nSignature Matrix"),
-    ]:
-        _box(ax, scrna_x, y, text, c_scrna)
-    for y1, y2 in [(6.78, 6.15), (5.28, 4.65), (3.78, 3.15)]:
-        _arrow(ax, scrna_x, y1, y2, c_scrna)
-
-    # ── 空间转录组中列 ─────────────────────────────────────────────
-    sp_x = 7.4
-    sp_items = [
-        (7.2, "HCC4R Visium Slide\n(Discovery Cohort)", "#f93800"),
-        (5.7, "Cell2location\nDeconvolution", "#888"),
-        (4.2, "Spatial Niche Discovery\n(kNN + Leiden)", "#888"),
-        (2.7, "CHC20 Visium Slide\n(Validation, Label Transfer)", "#ffb500"),
-    ]
-    for y, text, color in sp_items:
-        _box(ax, sp_x, y, text, color)
-    for y1, y2 in [(6.78, 6.15), (5.28, 4.65), (3.78, 3.15)]:
-        _arrow(ax, sp_x, y1, y2, c_spatial)
-
-    # ── 临床队列右列 ───────────────────────────────────────────────
-    tc_x = 12.65
-    for y, text in [
-        (7.2, "TCGA-LIHC / ICGC\n(n > 300 patients)"),
-        (5.7, "ssGSEA Scoring\n(Niche Signature Genes)"),
-        (4.2, "Survival Stratification\n(High vs Low)"),
-        (2.7, "Kaplan-Meier Curve\n& Cox Regression"),
-    ]:
-        _box(ax, tc_x, y, text, c_tcga, w=3.6)
-    for y1, y2 in [(6.78, 6.15), (5.28, 4.65), (3.78, 3.15)]:
-        _arrow(ax, tc_x, y1, y2, c_tcga)
-
-    # ── 跨列箭头 ──────────────────────────────────────────────────
-    # scRNA → 空间（参考签名）
-    ax.annotate("", xy=(5.75, 2.7), xytext=(3.75, 2.7),
-                arrowprops=dict(arrowstyle="-|>", color="#666", lw=2.0), zorder=3)
-    ax.text(4.75, 2.95, "cell_state_df", ha="center", fontsize=7.5,
-            color="#666", style="italic")
-
-    # 空间 → TCGA（签名基因）
-    ax.annotate("", xy=(10.7, 4.2), xytext=(9.05, 4.2),
-                arrowprops=dict(arrowstyle="-|>", color="#666", lw=2.0), zorder=3)
-    ax.text(9.875, 4.45, "Signature Genes", ha="center", fontsize=7.5,
-            color="#666", style="italic")
-
-    ax.set_title(
-        "Study Design: Spatial Immunosuppressive Niche in Hepatocellular Carcinoma",
-        fontsize=13, fontweight="bold", pad=14, color="#333",
+    ax.text(
+        0.5,
+        0.88,
+        "Fig.1A  Spatial immunosuppressive niche analysis workflow",
+        ha="center",
+        va="center",
+        fontsize=14,
+        fontweight="bold",
+        color="#20243a",
+    )
+    ax.text(
+        0.5,
+        0.18,
+        "Discovery in HCC4R with independent projection and validation in CHC20",
+        ha="center",
+        va="center",
+        fontsize=10,
+        color="#5a5f76",
     )
 
-    _save(fig, out_dir / "fig1A_workflow_diagram.png", dpi=dpi)
+    _save(fig, out_dir / "fig1A_workflow.png", dpi=dpi)
 
 
 # ============================================================
@@ -414,23 +399,46 @@ def plot_fig2A_HE(
     out_dir: Path,
     dpi: int = PAPER_DPI,
 ) -> None:
-    """展示 HCC4R H&E 图像，若无原始图则用 spot 空间分布图代替。
+    """展示 HCC4R H&E 图像，并叠加 Visium spot / spatial domain。
 
-    ★ 可调参数：
-      figsize=(8, 8)  — 图幅大小
-      s=2 / s=9       — 覆盖 spot / placeholder spot 大小
-      ax.set_facecolor("#f5e6d3") — placeholder 背景色
+    Space Ranger 的坐标通常是 full-resolution 像素坐标；如果显示的是
+    hires/lowres 图，需要按 scalefactors_json.json 中的比例缩放后再叠加。
     """
+    out_dir.mkdir(parents=True, exist_ok=True)
     he_image = None
+    image_kind: Optional[str] = None
+    scale_factor = 1.0
+    spot_diameter_fullres: Optional[float] = None
 
-    if visium_dir and visium_dir.exists():
-        for fname in ["tissue_hires_image.png", "tissue_lowres_image.png",
-                      "tissue_hires_image.jpg"]:
-            p = visium_dir / "spatial" / fname
-            if p.exists():
+    spatial_dir = visium_dir / "spatial" if visium_dir else None
+    if spatial_dir and spatial_dir.exists():
+        sf_path = spatial_dir / "scalefactors_json.json"
+        if sf_path.exists():
+            try:
+                scalefactors = json.loads(sf_path.read_text(encoding="utf-8"))
+                spot_diameter_fullres = scalefactors.get("spot_diameter_fullres")
+            except Exception as e:
+                logging.warning("Failed to read scalefactors_json.json: %s", e)
+                scalefactors = {}
+        else:
+            scalefactors = {}
+
+        image_candidates = [
+            ("tissue_hires_image.png", "hires", scalefactors.get("tissue_hires_scalef", 1.0)),
+            ("tissue_hires_image.jpg", "hires", scalefactors.get("tissue_hires_scalef", 1.0)),
+            ("tissue_lowres_image.png", "lowres", scalefactors.get("tissue_lowres_scalef", 1.0)),
+        ]
+        for fname, kind, sf in image_candidates:
+            img_path = spatial_dir / fname
+            if img_path.exists():
                 try:
-                    he_image = plt.imread(str(p))
-                    logging.info("H&E image loaded: %s", p)
+                    he_image = plt.imread(str(img_path))
+                    image_kind = kind
+                    scale_factor = float(sf)
+                    logging.info(
+                        "H&E image loaded: %s | image=%s | coordinate_scale=%.6f",
+                        img_path, image_kind, scale_factor,
+                    )
                     break
                 except Exception as e:
                     logging.warning("Failed to load H&E image: %s", e)
@@ -439,9 +447,44 @@ def plot_fig2A_HE(
 
     if he_image is not None:
         ax.imshow(he_image, origin="upper")
-        if "spatial_x" in spatial_df.columns:
-            ax.scatter(spatial_df["spatial_x"], spatial_df["spatial_y"],
-                       s=2, alpha=0.2, c="white", linewidths=0)
+        if {"spatial_x", "spatial_y"}.issubset(spatial_df.columns):
+            x = spatial_df["spatial_x"].astype(float) * scale_factor
+            y = spatial_df["spatial_y"].astype(float) * scale_factor
+
+            if spot_diameter_fullres is not None:
+                spot_size = max(6.0, (float(spot_diameter_fullres) * scale_factor * 0.32) ** 2)
+            else:
+                spot_size = 14.0
+
+            domain_col = _resolve_domain_col(spatial_df)
+            if domain_col is not None:
+                for region in sorted(spatial_df[domain_col].dropna().astype(str).unique()):
+                    mask = spatial_df[domain_col].astype(str) == region
+                    ax.scatter(
+                        x.loc[mask],
+                        y.loc[mask],
+                        s=spot_size,
+                        c=DOMAIN_COLORS.get(region, "#222222"),
+                        alpha=0.78,
+                        edgecolors="white",
+                        linewidths=0.18,
+                        label=DOMAIN_DISPLAY_NAMES.get(region, region),
+                    )
+                ax.legend(
+                    loc="upper right",
+                    bbox_to_anchor=(1.02, 1.02),
+                    fontsize=8,
+                    frameon=True,
+                    framealpha=0.86,
+                    edgecolor="none",
+                )
+            else:
+                ax.scatter(
+                    x, y, s=spot_size, alpha=0.78, c="#d62728",
+                    edgecolors="white", linewidths=0.18,
+                )
+        else:
+            logging.warning("spatial_x/spatial_y columns not found; H&E spots cannot be overlaid.")
     else:
         logging.warning("H&E image unavailable. Using spatial region plot as placeholder.")
         ax.set_facecolor("#f5e6d3")
@@ -453,16 +496,10 @@ def plot_fig2A_HE(
                                spatial_df.loc[mask, "spatial_y"],
                                c=color, s=SPOT_SIZE, alpha=0.8, linewidths=0, label=region)
             ax.legend(loc="upper right", fontsize=9, frameon=False,
-                      title="Spatial Region", title_fontsize=10)
-        elif "spatial_x" in spatial_df.columns:
-            ax.scatter(spatial_df["spatial_x"], spatial_df["spatial_y"],
-                       c="#c49c94", s=SPOT_SIZE, alpha=0.7, linewidths=0)
-        ax.text(0.5, 0.02,
-                "Placeholder: set --hcc4r-visium-dir to display actual H&E image",
-                transform=ax.transAxes, ha="center", va="bottom", fontsize=8,
-                color="#888888", style="italic")
+                      bbox_to_anchor=(1.32, 1.0))
 
-    ax.set_title("HCC4R: H&E Histology (Spatial Slide Overview)", fontsize=13, fontweight="bold")
+    ax.set_title("Fig.2A  H&E staining with spatial domains", fontsize=14, fontweight="bold")
+    ax.set_aspect("equal")
     ax.axis("off")
     _save(fig, out_dir / "fig2A_HE_image.png", dpi=dpi)
 

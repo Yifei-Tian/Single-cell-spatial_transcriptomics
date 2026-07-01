@@ -244,6 +244,51 @@ PRIOR_GENE_SETS: dict[str, list[str]] = {
     "CAF_activation": ["FAP", "ACTA2", "POSTN", "COL1A1", "CCL22"],
 }
 
+# Spatial spot plot style: magma gives a black-purple to orange-yellow
+# "hotspot" scale that works well for dense spatial abundance maps.
+SPATIAL_CONTINUOUS_CMAP: str = "magma"
+SPATIAL_SPOT_MARKER: str = "h"
+SPATIAL_SPOT_SIZE: float = 18.0
+
+
+def _assign_signature_module(gene: str) -> str | None:
+    """Assign a coarse functional module label for downstream Figure 5 gene loading."""
+    gene_u = str(gene).strip().upper()
+
+    immune_genes = {
+        "FOXP3", "IL2RA", "CTLA4", "TIGIT", "IKZF2", "TNFRSF18",
+        "IL10", "TGFB1", "PDCD1", "LAG3", "HAVCR2", "ENTPD1",
+        "CD163", "MRC1", "ARG1", "CCL22", "CCL17", "VSIR",
+        "IDO1", "IDO2", "CXCL12", "CXCR4", "PDCD1LG2", "CD274",
+        "LGALS9", "CCR4", "CCR2", "CCR5", "MIF", "CD74",
+    }
+    stromal_genes = {
+        "FAP", "ACTA2", "TAGLN", "RGS5", "PDGFRA", "PDGFRB",
+        "MYH11", "MCAM", "DES", "COL15A1", "PECAM1", "VWF",
+    }
+    ecm_genes = {
+        "LUM", "CXCL12", "AEBP1", "GSTP1", "DCN", "TAGLN", "THBS2", "FSTL1",
+        "COL6A1", "EFEMP1", "COL6A2", "EMILIN1", "COL3A1", "COL5A1", "COL1A2",
+        "COL1A1", "GSN", "CCDC80", "C11ORF96", "ISLR", "LIMD2", "BGN", "PTGDS",
+        "POSTN", "COL4A1", "COL4A2", "COL5A2", "COL6A3", "VCAN", "FN1", "LOXL2",
+        "SPP1", "MMP2", "MMP9", "MMP11", "SPARC", "TNC", "FBLN1", "FBLN2",
+        "LAMC1", "LAMA4", "LAMB1",
+    }
+
+    if gene_u in ecm_genes:
+        return "ecm"
+    if gene_u in immune_genes:
+        return "immune"
+    if gene_u in stromal_genes:
+        return "stromal"
+
+    if gene_u.startswith(("CCL", "CXCL", "HLA-", "IFI", "IGH", "IGK", "IGL")):
+        return "immune"
+    if gene_u.startswith(("COL", "MMP", "LAMA", "LAMB", "LAMC", "ITGA", "ITGB")):
+        return "ecm"
+
+    return None
+
 
 # ============================================================
 # 参数解析
@@ -255,7 +300,7 @@ def _parse_args() -> argparse.Namespace:
 
     所有参数均有合理默认值，可直接运行而无需传参。
     """
-    root = Path(__file__).resolve().parents[1]
+    root = Path(__file__).resolve().parents[2]
     results = root / "results"
     parser = argparse.ArgumentParser(
         description=(
@@ -1028,7 +1073,7 @@ def _spatial_scatter(
     value: str,
     path: Path,
     title: str,
-    cmap: str = "paper_ybp",
+    cmap: str = SPATIAL_CONTINUOUS_CMAP,
     categorical: bool = False,
 ) -> None:
     """
@@ -1037,24 +1082,11 @@ def _spatial_scatter(
     连续值模式（categorical=False）：颜色映射 + 颜色条；
     分类变量模式（categorical=True）：固定颜色 + 图例。
 
-    【配色说明 —— 仿论文 HCC single-cell ecosystem 风格】
-    - 连续值默认使用 "paper_ybp"（深蓝-青绿-亮黄渐变），
-      与参考论文图表（Expression 热图）颜色风格一致：
-        低值 → 深蓝色 (#253494)
-        中值 → 青绿色 (#1FA187)
-        高值 → 亮黄色 (#FDE725)
-      此配色对视觉有强对比度，高表达区域突出，适合空间分布图。
+    【配色说明】
+    - 连续值默认使用 "magma"（黑紫 → 橘红 → 明黄），突出热点区域。
+    - spot 使用六边形 marker 且无白色边框，降低密集点图的碎片感。
     - 分类变量使用高饱和度固定色板。
     """
-    from matplotlib.colors import LinearSegmentedColormap as _LSC
-
-    # 统一连续信号颜色映射
-    _PAPER_YBP = _LSC.from_list(
-        "paper_ybp",
-        ["#253494", "#1FA187", "#FDE725"],
-        N=256,
-    )
-
     fig, ax = plt.subplots(figsize=(7, 6))
     if categorical:
         palette = {
@@ -1065,21 +1097,25 @@ def _spatial_scatter(
             "other":                   "#bdbdbd",
         }
         colors = df[value].map(palette).fillna("#bdbdbd")
-        ax.scatter(df["spatial_x"], df["spatial_y"], c=colors, s=18, linewidths=0)
+        ax.scatter(
+            df["spatial_x"], df["spatial_y"],
+            c=colors, s=SPATIAL_SPOT_SIZE, marker=SPATIAL_SPOT_MARKER,
+            edgecolors="none", linewidths=0,
+        )
         present = df[value].unique()
         handles = [
-            Line2D([0], [0], marker="o", color="w",
+            Line2D([0], [0], marker=SPATIAL_SPOT_MARKER, color="w",
                    markerfacecolor=palette.get(lab, "#bdbdbd"),
+                   markeredgecolor="none",
                    label=lab, markersize=8)
             for lab in present if lab in palette
         ]
         ax.legend(handles=handles, frameon=False, loc="best", fontsize=8)
     else:
-        # 选择 colormap：识别 "paper_ybp" 关键词，其余按原名传入
-        actual_cmap = _PAPER_YBP if cmap == "paper_ybp" else cmap
         sc_obj = ax.scatter(
             df["spatial_x"], df["spatial_y"],
-            c=df[value], s=18, cmap=actual_cmap, linewidths=0,
+            c=df[value], s=SPATIAL_SPOT_SIZE, marker=SPATIAL_SPOT_MARKER,
+            cmap=cmap, edgecolors="none", linewidths=0,
         )
         fig.colorbar(sc_obj, ax=ax, fraction=0.046, pad=0.04)
     ax.set_title(title)
@@ -1218,7 +1254,7 @@ def _plot_hep_treg(df: pd.DataFrame, path: Path) -> None:
     from matplotlib.colors import LinearSegmentedColormap as _LSC
     _PAPER_YBP = _LSC.from_list(
         "paper_ybp",
-        ["#253494", "#1FA187", "#FDE725"],
+        ["#337def", "#0b0a35", "#fcc729"],
         N=256,
     )
     fig, ax = plt.subplots(figsize=(5.5, 5))
@@ -1365,7 +1401,7 @@ def _plot_lr_communication(
     from matplotlib.colors import LinearSegmentedColormap as _LSC
     _PAPER_YBP = _LSC.from_list(
         "paper_ybp",
-        ["#253494", "#1FA187", "#FDE725"],
+        ["#337def", "#0b0a35", "#fcc729"],
         N=256,
     )
 
@@ -1843,6 +1879,13 @@ def _rank_niche_genes(
         )
 
     result = sig.head(top_n).reset_index(drop=True)
+    result["module"] = result["gene"].map(_assign_signature_module)
+    n_labeled = int(result["module"].notna().sum())
+    logging.info(
+        "Assigned module labels for %d/%d signature genes (immune/stromal/ecm).",
+        n_labeled,
+        len(result),
+    )
 
     # ── Layer 2：先验功能基因集 AUC 检验 ──────────────────────────────────────
     prior_rows = []
@@ -2305,6 +2348,159 @@ def _plot_niche_comparison(
     logging.info("Niche comparison plot saved: %s", path)
 
 
+
+
+# ============================================================
+# 主流程
+# ============================================================
+
+def main() -> int:
+    """
+    主函数：执行完整的空间免疫抑制生态位分析流程。
+
+    返回 0 表示正常完成（供 Shell 脚本通过 $? 检查）。
+    """
+    # ── Step 1: 初始化 ──────────────────────────────────────────────────────────
+    _setup_logging()
+    args = _parse_args()
+    np.random.seed(args.seed)
+    args.out_dir.mkdir(parents=True, exist_ok=True)
+    plot_dir = args.out_dir / "plots"
+    plot_dir.mkdir(parents=True, exist_ok=True)
+
+    # ── Step 2: 数据加载与校验 ───────────────────────────────────────────────────
+    logging.info("Loading spatial AnnData: %s", args.adata)
+    adata = ad.read_h5ad(args.adata)
+    if "spatial" not in adata.obsm:
+        raise KeyError("adata.obsm['spatial'] is required for spatial niche analysis.")
+
+    abundance = _get_abundance(adata, args.abundance_key)
+    required_cols = [
+        args.hepatocyte_col, args.treg_col,
+        args.myeloid_col, args.fibroblast_col, args.tnk_col,
+    ]
+    missing_cols = [c for c in required_cols if c not in abundance.columns]
+    if missing_cols:
+        raise KeyError(
+            f"Missing cell abundance columns: {missing_cols}; "
+            f"available: {list(abundance.columns)}"
+        )
+
+    # ── Step 3: 归一化细胞丰度为比例 ────────────────────────────────────────────
+    proportions = (
+        abundance.div(abundance.sum(axis=1).replace(0, np.nan), axis=0)
+        .fillna(0.0)
+    )
+    coords = np.asarray(adata.obsm["spatial"])
+
+    # ── Step 4: 构建空间半径邻域（用于计算邻域均值特征） ─────────────────────────
+    neighbors_radius, radius = _spatial_neighbors(coords, args.neighbor_radius_multiplier)
+    logging.info(
+        "Spatial neighbor radius (multiplier=%.2f): %.3f",
+        args.neighbor_radius_multiplier, radius,
+    )
+
+    # ── Step 5: 计算免疫抑制基因模块评分 ────────────────────────────────────────
+    gene_score, marker_genes = _module_score(adata, IMMUNOSUPPRESSIVE_GENES)
+    logging.info(
+        "Immunosuppressive marker genes used (%d): %s",
+        len(marker_genes),
+        ", ".join(marker_genes) if marker_genes else "none",
+    )
+
+    # ── Step 6: 邻域组成聚类（Cellular Neighborhood Discovery）────────────────
+    # 联合分析模式（--per-sample-neighbors）：空间邻域只在同一切片内建立
+    per_sample = getattr(args, "per_sample_neighbors", False)
+    sample_labels = None
+    if per_sample and "sample" in adata.obs.columns:
+        # 重设位置型 Series 索引（0..n_spots-1）以供 _build_knn_neighbors_per_sample 使用
+        sample_labels = pd.Series(
+            adata.obs["sample"].values,
+            index=np.arange(len(adata)),
+        )
+        n_samples = sample_labels.nunique()
+        logging.info(
+            "Step 6: Joint analysis mode — building per-sample kNN neighbors "
+            "(k=%d) for %d samples: %s",
+            args.n_neighbors, n_samples, list(sample_labels.unique()),
+        )
+        neighbors_knn = _build_knn_neighbors_per_sample(
+            coords, sample_labels, k=args.n_neighbors
+        )
+    else:
+        if per_sample and "sample" not in adata.obs.columns:
+            logging.warning(
+                "--per-sample-neighbors specified but 'sample' column not found in adata.obs; "
+                "falling back to global kNN."
+            )
+            per_sample = False
+        logging.info(
+            "Step 6: Building kNN neighbors (k=%d) for neighborhood composition clustering...",
+            args.n_neighbors,
+        )
+        neighbors_knn = _build_knn_neighbors(coords, k=args.n_neighbors)
+    neighborhood_comp = _compute_neighborhood_composition(proportions, neighbors_knn)
+
+    logging.info(
+        "Step 6: Running Leiden clustering on neighborhood composition "
+        "(resolution=%.2f, seed=%d)...",
+        args.leiden_resolution, args.seed,
+    )
+    nc_labels = _leiden_cluster_neighborhood(
+        neighborhood_comp,
+        n_neighbors=args.n_neighbors,
+        resolution=args.leiden_resolution,
+        seed=args.seed,
+    )
+    n_clusters = len(nc_labels.unique())
+    logging.info("Leiden clustering identified %d neighborhood clusters.", n_clusters)
+
+    # ── Step 7: 功能评分注释 niche cluster ──────────────────────────────────────
+    logging.info("Step 7: Annotating neighborhood clusters with functional scores...")
+    tmp_df = proportions.copy()
+    tmp_df["immunosuppressive_gene_score"] = (
+        gene_score.reindex(tmp_df.index).fillna(0.0).to_numpy()
+    )
+    tmp_df["neighborhood_cluster"] = nc_labels.reindex(tmp_df.index).to_numpy()
+
+    niche_semantic, cluster_stats = _annotate_neighborhood_clusters(
+        df=tmp_df,
+        cluster_col="neighborhood_cluster",
+        treg_col=args.treg_col,
+        myeloid_col=args.myeloid_col,
+        fibroblast_col=args.fibroblast_col,
+    )
+    cluster_stats.to_csv(args.out_dir / "neighborhood_cluster_stats.csv")
+
+    # ── Step 8: 构建综合分析 DataFrame ──────────────────────────────────────────
+    df = proportions.copy()
+    df.insert(0, "spot_id", adata.obs_names)
+    df["spatial_x"]   = coords[:, 0]
+    df["spatial_y"]   = coords[:, 1]
+    df["neighbor_radius"] = radius
+    df["immunosuppressive_gene_score"] = gene_score.reindex(df.index).to_numpy()
+    df["neighborhood_cluster"]   = nc_labels.reindex(df.index).to_numpy()
+    df["niche_semantic_label"]   = niche_semantic.reindex(df.index).to_numpy()
+
+    # 高肝细胞区域标志（辅助注释，不用于 niche 发现主体）
+    hep = df[args.hepatocyte_col]
+    hep_thr = float(hep.quantile(args.hep_high_quantile))
+    df["hep_high"] = hep >= hep_thr
+    df["distance_to_hep_high"] = _distance_to_mask(coords, df["hep_high"].to_numpy())
+
+    # 各细胞类型的空间邻域均值
+    for col in [args.hepatocyte_col, "Treg", args.tnk_col,
+                args.myeloid_col, args.fibroblast_col]:
+        out_col = col.replace("/", "_")
+        df[f"neighbor_{out_col}"] = _neighbor_mean(df[col], neighbors_radius)
+
+    # 是否有高肝细胞邻居（用于 tumor_edge 标注）
+    hep_high_arr = df["hep_high"].to_numpy()
+    df["has_hep_high_neighbor"] = [
+        bool(len(idx) and hep_high_arr[idx].any())
+        for idx in neighbors_radius
+    ]
+
     # ── Step 9: 多层次评分计算 ──────────────────────────────────────────────────
     # Treg 样评分：Treg 比例 + 免疫抑制基因评分（Z-score 加总）
     df["Treg_like_score"] = (
@@ -2333,7 +2529,7 @@ def _plot_niche_comparison(
     df["niche_high"] = df["immunosuppressive_niche_score"] >= niche_thr
 
     # ── Step 10: 辅助空间区域标注（基于规则，仅用于可视化） ─────────────────────
-    stroma_thr = float(df["immune_stroma_score"].quantile(0.60))
+    stroma_thr = float(df["immune_stroma_score"].quantile(0.50))
     region = pd.Series("other", index=df.index)
     region[df["hep_high"]] = "tumor_core"
     region[
@@ -2397,12 +2593,11 @@ def _plot_niche_comparison(
                      plot_dir / "spatial_myeloid.png", "Myeloid proportion")
     _spatial_scatter(df, args.fibroblast_col,
                      plot_dir / "spatial_fibroblast.png", "Fibroblast proportion")
-    # 免疫抑制 niche 综合评分空间分布图（统一 paper_ybp 配色）
+    # 免疫抑制 niche 综合评分空间分布图（统一 magma 热点配色）
     _spatial_scatter(
         df, "immunosuppressive_niche_score",
         plot_dir / "spatial_immunosuppressive_niche_score.png",
         "Immunosuppressive niche score",
-        cmap="paper_ybp",
     )
     # 邻域组成聚类空间分布图
     _plot_neighborhood_clusters(df, plot_dir / "spatial_neighborhood_clusters.png")
@@ -2442,7 +2637,7 @@ def _plot_niche_comparison(
     _plot_sensitivity(sensitivity_df, plot_dir / "sensitivity_niche_stability.png")
 
     # ── 新增图1：niche_high 分位数阈值切割的 spot 空间二值分布图 ─────────────────
-    # 颜色编码：统一 paper_ybp 色板显示 niche_high 阈值分组
+    # 颜色编码：统一 magma 热点色板显示 niche_high 阈值分组
     # 与 spatial_niche_semantic_labels.png（Leiden 聚类方法）对比，
     # 展示"评分法"与"聚类法"在空间上的差异（重叠/分歧）。
     logging.info("Step 13+: Generating niche_high score-based binary map...")
@@ -2450,7 +2645,6 @@ def _plot_niche_comparison(
         df, "niche_high",
         plot_dir / "spatial_niche_high_score_spots.png",
         f"Niche-High Spots (score > {int(args.niche_high_quantile * 100)}th percentile)",
-        cmap="paper_ybp",
     )
 
     # ── 新增图2：聚类方法 vs 评分方法并排对比图 ──────────────────────────────────
@@ -2611,6 +2805,7 @@ def _plot_niche_comparison(
         out_csv,
     )
     return 0
+
 
 
 if __name__ == "__main__":
