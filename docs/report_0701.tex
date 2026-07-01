@@ -53,7 +53,12 @@
     language=Python,
     showstringspaces=false,
     xleftmargin=1em,
-    framexleftmargin=1em
+    framexleftmargin=1em,
+    extendedchars=false,      % 关键：关闭 listings 对高位字符的默认处理，允许中文
+    keepspaces=true,          % 保持空格
+    basicstyle=\small\ttfamily, % 使用等宽字体
+    commentstyle=\color{gray},
+    % 如果你希望中文注释能正常显示，最好显式指定逃逸字符（见方法2）
 }
 
 \hypersetup{
@@ -133,16 +138,17 @@ HCC 五年生存率不足20\%，大多数患者确诊时已属晚期，丧失手
 并成为首个在总生存期上优于索拉非尼的一线方案~\citep{finn2020atezolizumab}。
 然而，仍有约70\%的患者对此联合方案无应答，提示肝癌肿瘤微环境中存在强大而多层次的免疫抑制屏障，
 单靠 PD-L1/PD-1 阻断不足以逆转免疫排斥表型。
-
 深入理解 HCC 免疫抑制微环境的空间结构与分子机制，
 是突破现有免疫治疗瓶颈、开发新型联合治疗策略的关键科学基础~\citep{llovet2021hepatocellular}。
 
 \subsection{肿瘤微环境中的免疫抑制细胞网络}
+{\color{red}（目前这个版本这三类细胞有点太割裂了，想改成既简单介绍一下细胞，又体现出免疫抑制的机制）}
 
-\subsubsection{调节性 T 细胞（Treg）的核心作用}
+肿瘤微环境是一个由肿瘤细胞、免疫细胞、基质细胞及细胞外基质共同构成的复杂生态系统。
+其中，在肿瘤微环境中起核心作用的细胞有调节性 T 细胞（Regulatory T cells, Treg）、肿瘤相关巨噬细胞（TAM）和肿瘤相关成纤维细胞（CAF）。
 
-调节性 T 细胞（Regulatory T cells，Treg）是免疫抑制微环境的核心节点细胞。
-Treg 以 FOXP3 为关键转录因子，以 CD4$^+$CD25$^+$FOXP3$^+$ 为经典表型，
+Treg 是免疫抑制微环境的核心节点细胞。
+Treg 以 FOXP3 为关键转录因子，以 $\text{CD4}^{+}\text{CD25}^{+}\text{FOXP3}^{+}$ 为经典表型，
 通过分泌 IL-10、TGF-$\beta$、IL-35 等免疫抑制细胞因子，
 以及表达 CTLA-4、TIGIT、LAG-3、TIM-3 等免疫检查点分子，
 直接抑制效应性 CD8$^+$ T 细胞、自然杀伤细胞（NK cell）和树突状细胞的抗肿瘤活性~\citep{sakaguchi2020regulatory}。
@@ -150,8 +156,6 @@ Zheng 等人~\citep{zheng2017landscape} 利用单细胞转录组技术绘制了�
 浸润 T 细胞的全景图谱，发现 Treg 在肿瘤组织中显著富集，
 其与 CD8$^+$ T 细胞的比例是预测患者预后的强效独立因子，
 Treg 比例越高预后越差。
-
-\subsubsection{肿瘤相关巨噬细胞（TAM）的免疫抑制功能}
 
 肿瘤相关巨噬细胞（Tumor-Associated Macrophage，TAM）
 在 HCC 微环境中以 M2 极化表型（CD163$^+$MRC1$^+$）为主~\citep{ma2021comprehensive}。
@@ -161,8 +165,6 @@ M2 型 TAM 通过分泌 CCL22、CXCL12 等趋化因子主动招募 Treg 进入�
 单细胞研究表明，TAM 与 Treg 之间存在双向正反馈循环——
 TAM 招募 Treg，而 Treg 反过来通过 IL-10 信号维持 TAM 的 M2 极化状态，
 两者协同构建了强大而稳定的免疫抑制局部生态~\citep{noy2014tumor}。
-
-\subsubsection{肿瘤相关成纤维细胞（CAF）构建的物理与化学屏障}
 
 肿瘤相关成纤维细胞（Cancer-Associated Fibroblast，CAF）
 以 FAP、ACTA2、POSTN 等标志物为特征，
@@ -175,36 +177,30 @@ Mariathasan 等人~\citep{mariathasan2018tgfb} 在膀胱癌中的经典研究表
 TGF-$\beta$ 驱动的 CAF 激活是免疫治疗耐药的"排斥表型（excluded phenotype）"
 的核心机制，该机制在肝癌中同样高度保守~\citep{ma2021comprehensive}。
 
-\subsection{空间转录组学的技术突破与应用前景}
-
-\subsubsection{从 scRNA-seq 到空间转录组：技术演进}
-
+\subsection{空间转录组学的前沿进展}
 传统 bulk RNA-seq 将整个组织匀浆后测序，丢失了细胞类型和空间位置信息；
-单细胞转录组（scRNA-seq）虽解析单细胞转录特征，
+单细胞转录组（scRNA-seq）虽解析单细胞转录特征，能够获得细胞类型的相关信息，
 但在组织解离时不可避免地破坏细胞间的空间关系~\citep{luecken2019current}。
-10x Genomics Visium 空间转录组平台的问世弥补了这一关键缺陷——
-它能在保留组织原位空间结构的前提下，
+10x Genomics Visium 空间转录组平台则能在保留组织原位空间结构的前提下，
 对每个空间位点（spot，直径约55\,$\mu$m，覆盖约1--10个细胞）进行全转录组测序~\citep{williams2022introduction}。
-这一技术的核心价值在于：能够直接观测细胞在组织中的空间分布模式，
+这一技术使研究人员能够直接观测细胞在组织中的空间分布模式，
 揭示哪些细胞类型在哪些空间区域共定位（co-localization），
-以及局部微环境的基因表达状态——这是理解 TME 功能异质性不可或缺的维度。
+以及局部微环境的基因表达状态。
 
-\subsubsection{Visium 的局限性与反卷积方法的必要性}
+然而，Visium 技术目前的空间分辨率尚未达到单细胞水平，每个 spot 实际上是多种细胞类型转录信号的混合~\citep{williams2022introduction}。因此，必须结合 scRNA-seq 参考数据通过计算反卷积方法，将每个 spot 的混合信号分解为各细胞类型的相对丰度估计。
 
-Visium 技术目前的空间分辨率尚未达到单细胞水平，
-每个 spot 实际上是多种细胞类型转录信号的混合~\citep{williams2022introduction}。
-因此，必须结合 scRNA-seq 参考数据通过计算反卷积方法，
-将每个 spot 的混合信号分解为各细胞类型的相对丰度估计——
-这是空间转录组下游分析的关键前提步骤。
+当前主流的空间反卷积工具可大致分为贝叶斯层次模型类（Cell2location, RCTD）、空间条件概率类（CARD）和深度学习类（Tangram）这三类方法。
 
-当前主流反卷积工具包括：
-Cell2location~\citep{kleshchevnikov2022cell2location}（贝叶斯层次模型），
-RCTD~\citep{cable2021robust}（概率框架），
-CARD~\citep{ma2022integrative}（空间条件自回归先验），
-Tangram~\citep{biancalani2021deep}（深度学习映射）。
+Cell2location~\cite{kleshchevnikov2022cell2location} 基于负二项贝叶斯层次模型，以单细胞数据为参考，在全基因组范围内同时估计多种细胞类型的绝对丰度，并自然地提供后验不确定性量化。其显著优势在于：能够同时建模技术噪声（检测效率、批次效应）和生物变异；对稀有细胞类型（如 Treg，典型比例 $<$ 5\%）有更高的检测灵敏度；在复杂组织结构（如异质性强的肿瘤边缘区域）中表现更为稳健。
+RCTD（Robust Cell Type Decomposition）~\cite{cable2021robust} 同样采用概率框架，对细胞检测效率进行显式建模，在低 UMI spot 场景下具有较强的鲁棒性。
+
+CARD（Conditional Autoregressive Deconvolution）~\cite{ma2022integrative} 引入空间条件自回归先验（conditional autoregressive prior），在优化目标函数中显式约束空间相邻 spot 的细胞组成相似性，适合细胞类型空间分布较为平滑的组织。
+
+Tangram~\cite{biancalani2021deep} 基于深度学习优化框架，将 scRNA-seq 细胞映射至空间坐标，在具有匹配 H\&E 图像信息时尤为强大，但计算成本较高，且对参考数据质量要求较高。
+
 多项独立基准测试~\citep{li2022benchmarking, sang2023spotless, yan2023benchmarking}
-一致表明，在多细胞类型混合、稀有细胞类型检测的场景中，
-Cell2location 性能优异，是肿瘤免疫微环境空间解析的首选工具。
+一致表明，在多细胞类型混合、稀有细胞类型检测的场景中，Cell2location 性能优异，是肿瘤免疫微环境空间解析的首选工具。
+
 
 \subsubsection{空间转录组在肿瘤免疫研究中的前沿应用}
 
