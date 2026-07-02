@@ -120,7 +120,7 @@ Cellular Neighborhoods；配体-受体通讯；ssGSEA；生存分析
 
 \subsection{疾病背景与临床挑战}
 
-肝细胞癌是全球第六大恶性肿瘤，每年新发病例超过90万，死亡病例约83万，
+肝细胞癌（HCC）是全球第六大恶性肿瘤，每年新发病例超过90万，死亡病例约83万，
 其中中国约占全球新发病例的45\%~\citep{llovet2021hepatocellular,chen2021liver}。
 由于大多数患者确诊时已属晚期，HCC 的五年生存率不足20\%。
 索拉非尼曾是晚期 HCC 的标准一线方案，但相比对照组仅将中位总生存期延长约3个月~\citep{llovet2008sorafenib}。
@@ -128,23 +128,21 @@ Cellular Neighborhoods；配体-受体通讯；ssGSEA；生存分析
 并首次在总生存期上优于索拉非尼~\citep{finn2020atezolizumab}；
 然而仍有约70\%的患者对该联合方案无应答，揭示肿瘤微环境中存在强大的多层次免疫抑制机制。
 
-HCC 微环境中的免疫抑制由多种细胞协同构建。
-Treg 以 CD4$^+$CD25$^+$FOXP3$^+$ 为经典表型，
-通过分泌 IL-10、TGF-$\beta$ 和 IL-35，以及表达 CTLA-4、TIGIT、LAG-3 等检查点分子，
+HCC 微环境中的免疫抑制由多种细胞协同构建。调节性 T 细胞（Treg）以 CD$4^+$CD$25^+$ FOXP$3^+$ 为经典表型，通过分泌 IL-10、TGF-$\beta$ 和 IL-35，以及表达 CTLA-4、TIGIT、LAG-3 等检查点分子，
 直接抑制效应性 T 细胞与 NK 细胞的抗肿瘤活性~\citep{sakaguchi2020regulatory}；
 单细胞转录组研究表明 Treg 在肝癌组织中显著富集，
-Treg 与 CD8$^+$ T 细胞的比值是独立预后因子~\citep{zheng2017landscape}。
-以 M2 极化表型（CD163$^+$MRC1$^+$）为主的 TAM 通过 CCL22--CCR4 和 CXCL12--CXCR4 轴
+Treg 与 CD$8^+$ T 细胞的比值是独立预后因子~\citep{zheng2017landscape}。
+以 M2 极化表型（CD163$^+$MRC1$^+$）为主的肿瘤相关巨噬细胞（TAM）通过 CCL22--CCR4 和 CXCL12--CXCR4 轴
 主动招募 Treg 进入肿瘤区域，同时分泌 TGF-$\beta$ 并高表达 PD-L1 以抑制效应性 T 细胞~\citep{biswas2012macrophage,noy2014tumor}；
 TAM 与 Treg 之间的双向正反馈循环共同维持了稳定的局部免疫抑制生态。
-以 FAP、ACTA2 和 POSTN 为标志的 CAF 则通过分泌 CXCL12 招募免疫抑制细胞，
+以 FAP、ACTA2 和 POSTN 为标志的肿瘤相关成纤维细胞（CAF）则通过分泌 CXCL12 招募免疫抑制细胞，
 并通过重塑细胞外基质（ECM）形成物理屏障阻碍效应性 T 细胞浸润~\citep{kalluri2016biology,mariathasan2018tgfb}。
 这一 Treg--TAM--CAF 三角轴的协同作用是 HCC 免疫治疗耐药的核心机制，
 也是本项目重点解析的生物学对象。
 
 \subsection{空间转录组学与整合分析范式}
 
-理解免疫抑制的空间组织结构是突破上述瓶颈的关键。
+上述研究需要理解免疫抑制的空间组织结构。
 传统 bulk RNA-seq 将组织均质化后测序，丢失了细胞间的空间位置信息；
 scRNA-seq 虽能解析单细胞转录特征，但在组织解离过程中不可避免地破坏了空间关系~\citep{luecken2019current}。
 10x Genomics Visium 空间转录组平台在保留组织原位结构的前提下，
@@ -164,9 +162,9 @@ Schürch 等人在结直肠癌中发展的"细胞邻域"概念，
 投影至大规模临床队列，结合多变量 Cox 回归~\citep{cox1972regression}
 进行独立预后验证，是当前实现"空间发现--临床转化"的经典策略~\citep{hanzelmann2013gsva}。
 
-尽管上述技术进步令人振奋，现有 HCC 研究仍普遍缺少三个维度的整合：
+现有 HCC 研究仍普遍缺少三个维度的整合：
 在保留空间信息的前提下，将 Treg--TAM--CAF 轴的共定位从描述性层面提升至配体-受体通讯机制层面；
-采用数据驱动（而非经验阈值）的方法识别免疫抑制空间生态位；
+采用数据驱动的方法识别免疫抑制空间生态位；
 以及将空间转录组发现系统性地在独立大规模临床队列中进行预后验证。
 本项目针对上述不足，建立了一套可推广的完整转化分析框架。
 
@@ -185,25 +183,17 @@ Schürch 等人在结直肠癌中发展的"细胞邻域"概念，
 % ============================================================
 
 \section{方法}
-
 \subsection{数据来源与质量控制}
 
-scRNA-seq 参考数据来自 GEO 数据库（登录号：GSE149614），
-涵盖肝细胞（Hepatocyte）、T/NK 细胞、B 细胞、髓系细胞（Myeloid）
-和成纤维细胞（Fibroblast）等细胞类型。
-参考当前 scRNA-seq 分析最佳实践~\citep{luecken2019current}，
-过滤总表达量低于200的低质量细胞及在少于10个细胞中表达的基因。
-由于 Cell2location RegressionModel 的贝叶斯框架已内置对测序深度和批次效应的建模，
-此阶段不执行 library size 归一化或 log1p 变换，直接以原始 count 矩阵作为输入。
+本研究整合了单细胞转录组（scRNA-seq）、空间转录组（ST）及大规模临床大规模转录组等多模态数据集，以构建“外周发现--空间定位--临床验证”的转化医学分析框架。
 
-空间转录组数据由 10x Genomics Visium 平台生成，包含两张肝癌组织切片：
-HCC4R 作为主分析切片，CHC20 作为独立验证切片。
-参照空间转录组分析最佳实践~\citep{williams2022introduction,palla2022squidpy}，
-保留总 UMI 计数在5000--35000之间的 spot，
-过滤线粒体基因比例超过20\%的 spot，
-并保留在至少10个 spot 中有表达的基因。
-预后验证数据来自 TCGA-LIHC 队列（约370例患者），
-通过 TCGAbiolinks R 包~\citep{colaprico2016tcgabiolinks} 从 GDC 数据库下载 HTSeq-FPKM 格式表达矩阵及临床随访信息。
+首先，单细胞参考数据集下载自 GEO 数据库（登录号：GSE149614），涵盖肝细胞（Hepatocyte）、T/NK 细胞、B 细胞、髓系细胞（Myeloid Cell）和成纤维细胞（Fibroblast）等核心细胞类型。参照当前单细胞组学分析的最佳实践~\citep{luecken2019current}，本研究严格过滤了总表达量低于 200 的低质量细胞以及在少于 10 个细胞中表达的基因。鉴于后续所采用的 Cell2location 空间反卷积模型基于贝叶斯负二项回归框架，其内部已实现了对测序深度和技术批次效应的概率建模，因此在单细胞预处理阶段不执行常规的文库大小归一化或 $\log(1+p)$ 变换，直接保留原始 Count 矩阵作为模型的输入。
+
+本研究所使用的空间转录组测序数据均由 10x Genomics Visium 高通量平台生成，采用双中心、跨临床情境的严谨设计构建空间微环境特征的发现与验证闭环。其中，作为主发现集的切片 HCC4R源自前瞻性临床试验队列（GSE238264），该样本来自接受卡博替尼联合纳武利尤单抗靶向免疫新辅助治疗后的HCC切除标本，具有丰富的HCC-CAF空间交互背景；独立外部验证集切片 CHC20源自另一项聚焦于非酒精性脂肪性肝炎相关肝癌的独立空间组学队列，该队列核心关注肿瘤纤维化病灶中骨髓细胞介导的免疫抑制机制。
+
+参照空间转录组分析的最佳实践与质控标准~\citep{williams2022introduction,palla2022squidpy}，对上述两张 ST 切片进行统一过滤：仅保留总 UMI 计数在 5000--35000 之间、且线粒体基因比例低于 20\% 的高质量 Spots，同时剔除在少于 10 个 Spots 中表达的低频基因。
+
+最后，为了将空间组学发现系统性地推向独立大规模临床队列进行生存预后验证，本研究引入了 TCGA-LIHC 队列（包含约 370 例 HCC 患者）。通过 TCGAbiolinks R 包~\citep{colaprico2016tcgabiolinks} 从 GDC 数据库下载标准化的 HTSeq-FPKM 格式表达矩阵以及完整的临床随访与生存信息。
 
 \subsection{Treg 亚群鉴定与 Cell2location 反卷积}
 
@@ -224,30 +214,25 @@ detection\_alpha=20（官方推荐默认值），最大训练1000 epochs。
 \subsection{免疫抑制空间生态位的识别}
 
 以 Cell2location 输出的绝对丰度归一化为比例矩阵后，
-基于 $k=15$ 近邻构建空间邻接图，
-对每个 spot $i$ 计算其 $k$ 个近邻的细胞类型比例均值作为邻域组成向量 $\mathbf{n}_i$：
-
-\begin{equation}
+利用 $k$ 近邻算法（$k$-NN）在组织几何坐标上构建空间物理邻接图。
+对每个 spot $i$ 计算其在物理空间中 $k$ 个最近邻 spot 的细胞类型比例均值，从而抽象出邻域组成向量 $\mathbf{n}_i$：
+\begin{equation*}
 \mathbf{n}_i = \frac{1}{|\mathcal{N}_i|} \sum_{j \in \mathcal{N}_i} \mathbf{p}_j
 \label{eq:neighborhood_vector}
-\end{equation}
+\end{equation*}
+本研究沿用 Schürch 等人~\citep{schurch2020coordinated} 在结直肠癌研究中的经典参数选择 $k=15$，并通过 $k \in \{10, 15, 20\}$ 的敏感性分析验证空间拓扑结构的参数稳健性。
 
-$k=15$ 沿用 Schürch 等人~\citep{schurch2020coordinated} 在结直肠癌研究中的参数，
-并通过 $k \in \{10, 15, 20\}$ 的敏感性分析验证结论的参数稳健性。
-以邻域组成向量为特征，在特征空间中构建 $k$-NN 图，
-运行 Leiden 社区检测算法（分辨率=0.5）识别细胞邻域类型（cellular neighborhoods）；
+随后，以该邻域组成向量 $\mathbf{n}_i$ 为高维表型特征，在高维特征空间中重新构建 $k$-NN 图。最后，在此特征邻接图上运行 Leiden 社区检测算法（分辨率=0.5）以自适应识别空间生态位（Niche）类型。
 与 KMeans 相比，Leiden 无需预先指定聚类数、且理论上保证了聚类连通性~\citep{traag2019leiden}。
 
-对每个 Leiden cluster，计算 Treg 比例、Myeloid 比例、
-Fibroblast 比例和免疫抑制基因模块评分（见下）四个功能维度的均值，
+对每个 Leiden 聚类，计算 Treg 比例、Myeloid 比例、
+Fibroblast 比例和免疫抑制基因模块评分四个功能维度的均值，
 按各维度降序排名后求和得到综合排名 $R_c$：
-
 \begin{equation}
 R_c = \text{rank}(\bar{p}_{\text{Treg},c}) + \text{rank}(\bar{p}_{\text{Myeloid},c})
 + \text{rank}(\bar{p}_{\text{Fibroblast},c}) + \text{rank}(\bar{s}_{\text{immune},c})
 \label{eq:combined_rank}
 \end{equation}
-
 $R_c$ 最小的 cluster 注释为免疫抑制生态位（immunosuppressive niche），
 该多维综合评分确保所识别的 niche 同时满足 Treg--TAM--CAF 三角轴的协同富集特征，
 而非单一细胞类型的孤立高表达。
@@ -255,19 +240,19 @@ $R_c$ 最小的 cluster 注释为免疫抑制生态位（immunosuppressive niche
 免疫抑制基因模块评分由14个文献支持的标志基因（FOXP3、IL2RA、CTLA4、TIGIT、LAG3、PDCD1、HAVCR2、TGFB1、IL10、CXCL12、CCL22、TNFRSF18、TNFRSF4、IKZF2）~\citep{sakaguchi2020regulatory,sharma2023immunosuppressive}
 的 CP10K+log1p 表达均值定义；
 辅助评分体系（Treg-like score、immune-stroma score 和 niche score）通过对相应组成维度进行 Z-score 标准化后加和计算（详见附录）。
-敏感性分析采用 Spearman 秩相关系数（$\rho$）和连续型 Weighted Jaccard 相似度
+{\color{red}敏感性分析采用 Spearman 秩相关系数（$\rho$）和连续型 Weighted Jaccard 相似度
 评估 $k \in \{10, 15, 20\}$ 下评分排序的稳定性，
-以 $\rho > 0.90$ 且 weighted Jaccard $>$ 0.80 作为参数稳健性的通过标准~\citep{spearman1904proof}。
+以 $\rho > 0.90$ 且 weighted Jaccard $>$ 0.80 作为参数稳健性的通过标准~\citep{spearman1904proof}。}
 
 \subsection{特征基因签名的三层筛选}
-
+{\color{red}写得更详细一点}
 Visium spot 同时覆盖多种细胞类型（细胞稀释效应），
 使 FOXP3 等 Treg 标志基因在大多数 spot 中的原始表达量为零，
 导致均值 log2FC 被严重低估。
 为此，本研究以三层筛选策略提取免疫抑制生态位特征基因签名。
 
 第一层（Layer 1）：以空间网格聚合（block\_mwu 模式）将连续 spot 合并为 block 均值以降低空间自相关~\citep{palla2022squidpy}，
-对 niche\_high（$\geq$85百分位）vs niche\_low 组执行 Wilcoxon 检验+BH-FDR 校正~\citep{mann1947test}；
+对 {\color{red}niche\_high（$\geq$85百分位）}vs niche\_low 组执行 Wilcoxon 检验+BH-FDR 校正~\citep{mann1947test}；
 保留 FDR $<$ 0.1 且 AUC $>$ 0.60~\citep{hanley1982meaning}
 且（log2FC $>$ 0.3 OR $\Delta$frac $>$ 0.10）的基因，
 同时剔除涵盖管家基因、核糖体蛋白、线粒体基因等350余个非特异性基因的黑名单；
@@ -277,11 +262,13 @@ Visium spot 同时覆盖多种细胞类型（细胞稀释效应），
 TAM 特征基因（CD163、MRC1、TGFB1 等）和 CAF 激活基因（FAP、ACTA2、COL1A1 等）
 三组先验功能基因集分别执行 AUC 检验（阈值 AUC $>$ 0.60 且 $\Delta$frac $>$ 0.05），
 强制纳入符合条件的先验基因以防止 Visium 稀疏性导致的生物学关键基因漏选。
-第三层（Layer 3）：通过 Gini 不均等指数~\citep{yitzhaki1979relative}（阈值 Gini $>$ 0.3 且 log2FC $>$ 0）
+{\color{red}第三层（Layer 3）：通过 Gini 不均等指数~\citep{yitzhaki1979relative}（阈值 Gini $>$ 0.3 且 log2FC $>$ 0）
 捕获局灶性高表达的稀有免疫基因，
-弥补前两层均值比较对高度稀疏基因的系统性低估。
+弥补前两层均值比较对高度稀疏基因的系统性低估。}
+{\color{red}删除第三层，因为输出的gini指数表格是空的}
 
 \subsection{配体-受体通讯分析}
+{\color{red}公式写得更规范一点}
 
 参考 CellPhoneDB~\citep{efremova2020cellphonedb} 和 COMMOT~\citep{cang2023commot} 数据库，
 选取12对在 Treg--TAM--CAF 轴中具有明确生物学意义的配体-受体对
@@ -312,12 +299,10 @@ ssGSEA 为每位患者独立生成一个反映生态位活性的连续评分，
 更适合纳入预后回归模型，而非 GSVA 的跨样本相对活性估计~\citep{barbie2009systematic}。
 构建多变量 Cox 比例风险回归模型~\citep{cox1972regression}，
 以 ssGSEA 评分、年龄和肿瘤分期为协变量：
-
-\begin{equation}
+\begin{equation*}
 h(t \mid \mathbf{x}) = h_0(t) \cdot \exp(\beta_1 s_{\text{ssGSEA}} + \beta_2 \text{age} + \beta_3 \text{stage})
 \label{eq:cox}
-\end{equation}
-
+\end{equation*}
 控制年龄和分期（HCC 已知强效独立预后因子~\citep{llovet2021hepatocellular}）
 后，若 ssGSEA 评分的 $\beta_1$ 仍显著，则证明免疫抑制生态位签名捕获了独立于临床分期以外的预后信息。
 以 ssGSEA 评分中位数为阈值，绘制 Kaplan-Meier 生存曲线~\citep{kaplan1958nonparametric}，
