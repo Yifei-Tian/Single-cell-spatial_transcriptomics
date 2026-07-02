@@ -30,6 +30,8 @@
 \usepackage{tabularx}
 \usepackage{appendix}
 \usepackage{microtype}
+\usepackage{tikz}
+\usetikzlibrary{shapes.geometric, arrows.meta, positioning, fit, backgrounds}
 
 % ============================================================
 % 页面与格式设置
@@ -183,6 +185,70 @@ Schürch 等人在结直肠癌中发展的"细胞邻域"概念，
 % ============================================================
 
 \section{方法}
+
+\subsection{整体分析流程}
+
+本研究建立了一套贯穿"单细胞参考构建--空间反卷积--生态位识别--机制解析--跨样本与临床验证"五个阶段的完整转化分析框架（Figure~\ref{fig:workflow}）。整体流程以 scRNA-seq 参考图谱为起点，经 Cell2location 贝叶斯反卷积将细胞类型丰度映射至 Visium 空间切片的每个 spot；随后基于空间邻域组成的无监督聚类识别免疫抑制生态位，并通过两层次差异表达筛选提炼生态位特征基因签名；在此基础上分别开展配体-受体通讯定量分析（机制层面）、独立切片 CHC20 的跨样本复现验证（空间层面）以及 TCGA-LIHC 大队列的 ssGSEA 投影与多变量 Cox 生存分析（临床层面），三条分析支线相互独立又共同指向同一组生态位特征基因签名，从而构成"发现--机制--验证"的闭环证据链。各阶段对应的具体方法学细节见下文 2.2--2.6 节。
+
+\begin{figure}[H]
+\centering
+\begin{tikzpicture}[
+    node distance=0.9cm and 1.6cm,
+    font=\small,
+    box/.style={
+        rectangle, rounded corners=2pt, draw=black!70, thick,
+        minimum width=3.4cm, minimum height=1.05cm,
+        align=center, fill=blue!6, inner sep=4pt
+    },
+    box2/.style={
+        rectangle, rounded corners=2pt, draw=black!70, thick,
+        minimum width=3.4cm, minimum height=1.05cm,
+        align=center, fill=orange!10, inner sep=4pt
+    },
+    box3/.style={
+        rectangle, rounded corners=2pt, draw=black!70, thick,
+        minimum width=3.4cm, minimum height=1.05cm,
+        align=center, fill=green!10, inner sep=4pt
+    },
+    arrow/.style={-{Stealth[length=2.5mm]}, thick},
+    stagelabel/.style={font=\scriptsize\bfseries, text=black!60}
+]
+
+% ---- 第一行：数据与反卷积 ----
+\node[box] (sc) {scRNA-seq 参考图谱\\（GSE149614）\\Treg 亚群鉴定};
+\node[box, right=of sc] (st) {Visium 空间转录组\\HCC4R / CHC20\\质控与预处理};
+\node[box2, right=of st] (c2l) {Cell2location\\贝叶斯反卷积\\spot 级细胞丰度};
+
+% ---- 第二行：生态位识别 ----
+\node[box2, below=of c2l] (niche) {邻域组成 $k$-NN 图\\Leiden 聚类\\免疫抑制生态位识别};
+\node[box2, left=of niche] (sig) {两层特征基因筛选\\Wilcoxon/AUC + 先验基因集\\生态位签名基因};
+
+% ---- 第三行：机制、验证、临床 ----
+\node[box3, below=of sig] (lr) {配体-受体通讯分析\\CXCL12--CXCR4 等\\机制层面解析};
+\node[box3, right=of lr] (cross) {CHC20 跨切片验证\\双模块评分复现\\空间层面验证};
+\node[box3, right=of cross] (tcga) {TCGA-LIHC 队列\\ssGSEA + 多变量 Cox\\临床预后验证};
+
+% ---- 连接箭头 ----
+\draw[arrow] (sc) -- (st);
+\draw[arrow] (st) -- (c2l);
+\draw[arrow] (c2l) -- (niche);
+\draw[arrow] (niche) -- (sig);
+\draw[arrow] (sig) -- (lr);
+\draw[arrow] (sig.east) -- (cross.north);
+\draw[arrow] (sig.east) to[out=20, in=160] (tcga.north);
+
+% ---- 阶段标注 ----
+\node[stagelabel, above=0.15cm of sc] {阶段一：单细胞参考构建};
+\node[stagelabel, above=0.15cm of c2l] {阶段二：空间反卷积};
+\node[stagelabel, below=0.7cm of niche] {阶段三：生态位识别与特征基因提取};
+\node[stagelabel, below=0.7cm of lr] {阶段四：机制解析};
+\node[stagelabel, below=0.7cm of cross] {阶段五：跨样本 \& 临床验证};
+
+\end{tikzpicture}
+\caption{整体分析流程图。流程分为五个阶段：（一）基于 scRNA-seq 构建细胞类型参考图谱并鉴定 Treg 亚群；（二）以 Cell2location 将细胞类型丰度反卷积映射至 Visium 空间切片；（三）基于空间邻域组成的无监督聚类识别免疫抑制生态位，并以两层筛选策略提取生态位特征基因签名；（四）通过配体-受体通讯分析解析 Treg--TAM--CAF 轴的分子机制；（五）分别在独立切片 CHC20 与 TCGA-LIHC 大队列中完成空间层面与临床层面的双重验证。}
+\label{fig:workflow}
+\end{figure}
+
 \subsection{数据来源与质量控制}
 
 本研究整合了单细胞转录组（scRNA-seq）、空间转录组（ST）及大规模临床大规模转录组等多模态数据集，以构建“外周发现--空间定位--临床验证”的转化医学分析框架。
@@ -240,35 +306,78 @@ $R_c$ 最小的 cluster 注释为免疫抑制生态位（immunosuppressive niche
 免疫抑制基因模块评分由14个文献支持的标志基因（FOXP3、IL2RA、CTLA4、TIGIT、LAG3、PDCD1、HAVCR2、TGFB1、IL10、CXCL12、CCL22、TNFRSF18、TNFRSF4、IKZF2）~\citep{sakaguchi2020regulatory,sharma2023immunosuppressive}
 的 CP10K+log1p 表达均值定义；
 辅助评分体系（Treg-like score、immune-stroma score 和 niche score）通过对相应组成维度进行 Z-score 标准化后加和计算（详见附录）。
-{\color{red}敏感性分析采用 Spearman 秩相关系数（$\rho$）和连续型 Weighted Jaccard 相似度
-评估 $k \in \{10, 15, 20\}$ 下评分排序的稳定性，
-以 $\rho > 0.90$ 且 weighted Jaccard $>$ 0.80 作为参数稳健性的通过标准~\citep{spearman1904proof}。}
 
-\subsection{特征基因签名的三层筛选}
-{\color{red}写得更详细一点}
-Visium spot 同时覆盖多种细胞类型（细胞稀释效应），
-使 FOXP3 等 Treg 标志基因在大多数 spot 中的原始表达量为零，
-导致均值 log2FC 被严重低估。
-为此，本研究以三层筛选策略提取免疫抑制生态位特征基因签名。
+为验证上述邻域参数选择不会主导结论，本研究设计了不依赖硬阈值截断的连续型敏感性分析。分别以 $k$-NN 邻居数 $k \in \{10, 15, 20\}$ 及半径倍增系数 $\text{radius\_multiplier} \in \{1.0, 1.25, 1.5\}$ 两种邻域定义方式对综合 niche 评分（公式~\ref{eq:combined_rank} 所依据的四维 Z-score 加总）进行参数扰动，以主分析参数（$k=15$）下的评分向量作为参考基准，采用两个互补的连续型指标量化每次扰动后评分分布与参考基准的一致性，从而完全避免早期版本中因分位数硬截断（如仅比较 $k$-NN 前 20\% 高分 spot 集合的 Jaccard 相似度）所带来的边界敏感性问题：
 
-第一层（Layer 1）：以空间网格聚合（block\_mwu 模式）将连续 spot 合并为 block 均值以降低空间自相关~\citep{palla2022squidpy}，
-对 {\color{red}niche\_high（$\geq$85百分位）}vs niche\_low 组执行 Wilcoxon 检验+BH-FDR 校正~\citep{mann1947test}；
-保留 FDR $<$ 0.1 且 AUC $>$ 0.60~\citep{hanley1982meaning}
-且（log2FC $>$ 0.3 OR $\Delta$frac $>$ 0.10）的基因，
-同时剔除涵盖管家基因、核糖体蛋白、线粒体基因等350余个非特异性基因的黑名单；
-以 $\text{signature\_rank\_score} = 0.35 \cdot \text{minmax}(\log_2\text{FC}) + 0.35 \cdot \text{minmax}(\Delta\text{frac}) + 0.30 \cdot \text{minmax}(\text{AUC})$
-对候选基因进行加权综合排序。
-第二层（Layer 2）：针对 Treg 标志物（FOXP3、IL2RA、CTLA4 等）、
-TAM 特征基因（CD163、MRC1、TGFB1 等）和 CAF 激活基因（FAP、ACTA2、COL1A1 等）
-三组先验功能基因集分别执行 AUC 检验（阈值 AUC $>$ 0.60 且 $\Delta$frac $>$ 0.05），
-强制纳入符合条件的先验基因以防止 Visium 稀疏性导致的生物学关键基因漏选。
-{\color{red}第三层（Layer 3）：通过 Gini 不均等指数~\citep{yitzhaki1979relative}（阈值 Gini $>$ 0.3 且 log2FC $>$ 0）
-捕获局灶性高表达的稀有免疫基因，
-弥补前两层均值比较对高度稀疏基因的系统性低估。}
-{\color{red}删除第三层，因为输出的gini指数表格是空的}
+指标一为 Spearman 秩相关系数 $\rho$，定义为
+
+\begin{equation}
+\rho = 1 - \frac{6 \sum_i d_i^2}{n(n^2-1)}
+\label{eq:spearman}
+\end{equation}
+
+其中 $d_i$ 为参考评分与扰动后评分在第 $i$ 个 spot 上的秩次之差，$n$ 为 spot 总数。$\rho$ 直接度量全部 spot 相对排序的一致性，不受任何截断阈值影响，取值范围为 $[-1, 1]$，越接近 1 表示参数扰动对 spot 排序几乎没有影响。
+
+指标二为连续型加权 Jaccard 相似度（Weighted Jaccard），定义为
+
+\begin{equation}
+\text{WJ}(\mathbf{a}, \mathbf{b}) = \frac{\sum_i \min(a_i, b_i)}{\sum_i \max(a_i, b_i)}
+\label{eq:weighted_jaccard}
+\end{equation}
+
+其中 $\mathbf{a}$、$\mathbf{b}$ 分别为参考评分向量与扰动后评分向量经 Min-Max 归一化至 $[0,1]$ 后的结果。相较于传统基于二值集合的 Jaccard 指数，该连续形式对高分区域（即候选 niche 区域）天然赋予更高权重，弥补了 Spearman 秩相关对顶部与底部区域同等看待的不足，取值范围为 $[0, 1]$，越接近 1 表示高分区域的空间分布高度重合。
+
+两指标联合解读的稳健性判定标准为：$\rho > 0.95$ 且 $\text{WJ} > 0.90$ 判定为结果极稳健；$\rho > 0.90$ 且 $\text{WJ} > 0.80$ 判定为结果稳健、参数选择不敏感；$\rho < 0.85$ 或 $\text{WJ} < 0.70$ 则判定为该参数变化对结果有实质性影响，需要重新审视参数选择~\citep{spearman1904proof}。本研究以 $\rho > 0.90$ 且 $\text{WJ} > 0.80$ 作为参数稳健性的通过标准，在 $k$-NN 和半径两种邻域定义、共计 6 组参数扰动下的评分向量与主分析参考基准逐一比较，用于判断 $k=15$ 的参数选择是否显著影响下游 niche 识别与特征基因提取结果。
+
+\subsection{特征基因签名的两层筛选}
+
+Visium 每个 spot 覆盖约 5--50 个细胞的混合信号（细胞稀释效应），
+使 FOXP3、CTLA4 等 Treg 标志基因在绝大多数 spot 中的原始表达量为零，
+导致两组间均值差异（log2FC）被严重稀释，传统"仅依赖 Wilcoxon 检验 + log2FC 阈值"的
+差异表达筛选策略难以将这些低丰度但生物学关键的基因纳入 Top-N 候选列表。
+为此，本研究在 log2FC 之外引入检出率（fraction of spots with expression $>0$）
+作为互补维度，并以两层筛选策略提取免疫抑制生态位的特征基因签名：
+第一层通过统计检验对全基因组进行数据驱动的排序与筛选，
+第二层针对先验已知的功能基因集进行靶向核查与强制补全，
+二者共同构成最终的签名基因列表。
+
+第一层（Layer 1：Wilcoxon + BH-FDR + AUC + 检出率综合排序）：
+首先以空间网格聚合（block\_mwu 模式）将地理位置相邻的连续 spot 合并为 block 级别均值，
+以降低空间自相关对假设检验独立性的破坏~\citep{palla2022squidpy}；
+基于免疫抑制生态位综合评分（公式~\ref{eq:combined_rank} 所依据的四维 Z-score 加总）
+的第 90 百分位阈值，将 block 划分为
+niche\_high（$\text{score} \geq P_{90}$）与 niche\_low（$\text{score} < P_{90}$）两组，
+对每个基因执行单侧 Mann-Whitney U 检验（即 Wilcoxon 秩和检验），
+并以 Benjamini-Hochberg 方法对全部基因的 $p$ 值进行 FDR 多重检验校正~\citep{mann1947test}；
+在此基础上，分别计算两组的检出率 $\text{frac}_{\text{high}}$、$\text{frac}_{\text{low}}$
+及其差值 $\Delta\text{frac} = \text{frac}_{\text{high}} - \text{frac}_{\text{low}}$，
+以及由 Mann-Whitney U 统计量标准化得到的 AUC~\citep{hanley1982meaning}；
+主筛选条件为 FDR $<$ 0.1 且 AUC $>$ 0.60 且（log2FC $>$ 0.3 OR $\Delta$frac $>$ 0.10），
+若满足条件的基因数不足 80 个，则放宽至 FDR $<$ 0.2 且 AUC $>$ 0.55 且
+（log2FC $>$ 0.2 OR $\Delta$frac $>$ 0.05）；
+通过筛选的候选基因进一步剔除涵盖管家基因、核糖体蛋白、线粒体基因、血红蛋白基因、
+细胞周期基因、广谱炎症基因及组织损伤/应激基因等350余个非特异性基因的黑名单，
+以确保签名基因的 niche 特异性而非组织普遍活跃性；
+最终以
+
+\begin{equation}
+\text{signature\_rank\_score} = 0.35 \cdot \text{minmax}(\log_2\text{FC}) + 0.35 \cdot \text{minmax}(\Delta\text{frac}) + 0.30 \cdot \text{minmax}(\text{AUC})
+\label{eq:signature_rank_score}
+\end{equation}
+
+对候选基因进行加权综合排序，取排序前 80 个基因（若强制纳入的先验基因导致总数超出，则不作截断）作为初步签名基因集。
+
+第二层（Layer 2：先验功能基因集的靶向 AUC 检验与强制补全）：
+针对 Treg 标志物（FOXP3、IL2RA、CTLA4 等）、TAM 特征基因（CD163、MRC1、TGFB1 等）
+和 CAF 激活基因（FAP、ACTA2、COL1A1 等）三组具有明确文献支持的先验功能基因集，
+在 niche\_high 与 niche\_low 两组间逐一计算 AUC、log2FC、检出率差值 $\Delta$frac 及
+FDR 校正后的 $p$ 值，用于独立评估每个先验基因是否体现出 niche 特异性富集；
+对满足 AUC $>$ 0.60 且 $\Delta$frac $>$ 0.05（且不属于非特异性基因黑名单）的先验基因，
+无论其是否已通过第一层的全基因组排序，均强制并入最终签名基因列表，
+以防止因 Visium 稀疏表达导致部分生物学意义明确的关键基因被漏选。
+两层筛选流程的完整实现见附录~\ref{app:code}。
 
 \subsection{配体-受体通讯分析}
-{\color{red}公式写得更规范一点}
 
 参考 CellPhoneDB~\citep{efremova2020cellphonedb} 和 COMMOT~\citep{cang2023commot} 数据库，
 选取12对在 Treg--TAM--CAF 轴中具有明确生物学意义的配体-受体对
@@ -276,12 +385,23 @@ TAM 特征基因（CD163、MRC1、TGFB1 等）和 CAF 激活基因（FAP、ACTA2
 TIGIT--NECTIN2、LAG3--HLA-DRA、IL10--IL10RA、SPP1--CD44、
 MIF--CD74、VEGFA--KDR、Galectin9--TIM-3、CCL2--CCR2；
 完整列表见附录表~\ref{tab:lr_pairs}）。
-对每对 $(l, r)$，以 CP10K+log1p 标准化表达量的乘积作为通讯强度代理指标，
-$\text{LR\_score} = E_l \cdot E_r$，
+对每对配体-受体 $(l, r)$，以 CP10K+log1p 标准化表达量 $E_l$、$E_r$ 的乘积
+作为通讯强度代理指标：
+
+\begin{equation}
+\text{LR\_score} = E_l \cdot E_r
+\label{eq:lr_score}
+\end{equation}
+
 该乘积形式与 CellPhoneDB 实现一致，自然地满足"配体和受体须同时存在"的生物学约束~\citep{efremova2020cellphonedb}。
-分别计算 niche\_high 与 niche\_low 组的均值 LR\_score，
-以 $\text{log2FC} = \log_2[(\bar{\text{LR}}_{\text{high}} + \varepsilon)/(\bar{\text{LR}}_{\text{low}} + \varepsilon)]$（$\varepsilon = 10^{-6}$）
-量化生态位内的通讯富集倍数。
+分别计算 niche\_high 与 niche\_low 组的均值 LR\_score，并以
+
+\begin{equation}
+\log_2\text{FC} = \log_2\left(\frac{\overline{\text{LR}}_{\text{high}} + \varepsilon}{\overline{\text{LR}}_{\text{low}} + \varepsilon}\right), \qquad \varepsilon = 10^{-6}
+\label{eq:lr_log2fc}
+\end{equation}
+
+量化生态位内的通讯富集倍数，其中 $\varepsilon$ 为避免分母为零而引入的极小平滑常数。
 对主基因在数据集中缺失的情况，自动尝试同家族替代基因以最大化可分析通讯对的数量。
 
 \subsection{跨切片一致性验证与 TCGA 生存分析}
@@ -378,14 +498,14 @@ immunosuppressive niche score 的两组分布差异最为突出：
 
 \subsection{niche 特征基因签名的提取与功能注释}
 
-niche\_high（$\geq$85百分位）与 niche\_low 组的差异基因火山图（Figure 4A）揭示了
+niche\_high（$\geq$90百分位）与 niche\_low 组的差异基因火山图（Figure 4A）揭示了
 免疫抑制生态位的分子特征。右上象限中显著上调的基因涵盖：
 免疫抑制核心因子（TGFB1、IL10、CXCL12、CCL22）、
 CAF/ECM 重塑成分（FAP、ACTA2、COL1A1、SPP1）
 以及多种免疫检查点相关分子。
 FOXP3 和 IL2RA 虽在 log2FC 上值偏低，但 $-\log_{10}(\text{FDR})$ 有一定上移，
 这与 Visium 稀释效应导致 Treg 标志基因均值 FC 被低估的预期完全吻合，
-Layer 3 Gini Index 筛选对此进行了专项补偿~\citep{luecken2019current}。
+Layer 2 先验基因集的检出率差值（$\Delta$frac）和 AUC 指标对此进行了专项补偿~\citep{luecken2019current}。
 与之相对，左侧显著下调基因主要为 Hepatocyte 特征基因（ALB、APOA2 等），
 表明 niche\_high 区域肿瘤实质成分相对减少，免疫基质细胞占主导。
 
@@ -560,25 +680,32 @@ stats['combined_rank'] = stats.filter(like='rank_').sum(axis=1)
 niche_id = stats['combined_rank'].idxmin()
 \end{lstlisting}
 
-\subsection{三层特征基因筛选}
+\subsection{两层特征基因筛选}
 
-\begin{lstlisting}[caption={Layer 1 差异检验、Layer 3 Gini Index 计算}]
-# Layer 1: block-level Mann-Whitney U + AUC
+\begin{lstlisting}[caption={Layer 1 block 级 Wilcoxon + AUC + 检出率综合排序，Layer 2 先验基因集强制合并}]
+# Layer 1: block-level Mann-Whitney U + AUC + delta_frac
 from scipy.stats import mannwhitneyu
 # 空间网格聚合（降低空间自相关）
 gx = np.floor(df['spatial_x'].values / block_size).astype(int)
 gy = np.floor(df['spatial_y'].values / block_size).astype(int)
 block_ids = [f'{x}_{y}' for x, y in zip(gx, gy)]
+# 检出率差值（解决细胞稀释效应导致的均值 FC 低估）
+frac_high = (high_expr > 0).mean(axis=0)
+frac_low  = (low_expr  > 0).mean(axis=0)
+delta_frac = frac_high - frac_low
 # 计算 AUC = U / (n_high * n_low)
 u_stat, pval = mannwhitneyu(high_vals, low_vals, alternative='greater')
 auc = u_stat / (len(high_vals) * len(low_vals))
+# signature_rank_score 加权综合排序
+score = 0.35 * minmax(log2fc) + 0.35 * minmax(delta_frac) + 0.30 * minmax(auc)
 
-# Layer 3: Gini Index 筛选局灶性稀疏基因
-def gini_index(x):
-    x = np.sort(x.ravel())
-    n = len(x)
-    cumx = np.cumsum(x)
-    return (n + 1 - 2 * cumx.sum() / cumx[-1]) / n if cumx[-1] > 0 else 0
+# Layer 2: 先验功能基因集 AUC + delta_frac 检验，强制合并入签名列表
+for gene in prior_gene_set:
+    stat, p = mannwhitneyu(high_expr[gene], low_expr[gene], alternative='greater')
+    auc_g = stat / (len(high_expr) * len(low_expr))
+    dfrac_g = (high_expr[gene] > 0).mean() - (low_expr[gene] > 0).mean()
+    if auc_g > 0.6 and dfrac_g > 0.05 and gene not in non_specific_genes:
+        forced_signature_genes.add(gene)
 \end{lstlisting}
 
 \subsection{双模块评分与 ssGSEA}
