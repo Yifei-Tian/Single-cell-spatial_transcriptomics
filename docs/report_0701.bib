@@ -862,3 +862,56 @@
   doi       = {10.1136/gutjnl-2019-318419},
   note      = {骨桥蛋白 SPP1 由 HCC 恶性细胞和 TAM 共同分泌并招募/极化 TAM，其受体 CD44 广泛表达于肿瘤细胞与免疫细胞，提示 SPP1--CD44 通讯并非免疫抑制 niche 特异性信号，可解释该通路在 niche\_low（肿瘤实质）区域反而略高的观察}
 }
+
+% ============================================================
+% 11. 跨切片验证（CHC20）补充文献：混合型肝癌免疫微环境异质性
+% 及基因模块评分跨样本迁移方法学
+% ============================================================
+
+@article{joseph2019chc,
+  author    = {Joseph, Nancy M. and Tsokos, Christina G. and Umetsu, Sarah E. and Shain, A. Hunter and Kelley, Robin K. and Onodera, Courtney and Bowman, Sydney and Talevich, Eric and Ferrell, Linda D. and Kakar, Sanjay and Krings, Gregor},
+  title     = {Genomic profiling of combined hepatocellular-cholangiocarcinoma reveals similar genetics to hepatocellular carcinoma},
+  journal   = {Journal of Pathology},
+  year      = {2019},
+  volume    = {248},
+  number    = {2},
+  pages     = {164--178},
+  doi       = {10.1002/path.5243},
+  note      = {混合型肝细胞-胆管癌（combined hepatocellular-cholangiocarcinoma, cHCC-CCA）在基因组层面与经典 HCC 高度相似但具有独特的肿瘤微环境组成，支持本研究中将 CHC20 作为具有一定生物学差异的独立验证队列、而非同质重复样本的设计逻辑}
+}
+
+@article{tian2020chc,
+  author    = {Tian, Meng-Xin and Luo, Lin-Peng and Fu, Qiang and Zhang, Xin-Yang and Song, Sheng-Sheng and Wang, Hao and Jin, Ling and Tang, Wan-Ge and Zhao, Zhi-Xiang and Wang, Hui and Fang, Yuan and Wu, Xiu-Ling and Wang, Zheng-Cheng and Tao, Chen-Yang and Zhou, Peng-Yuan and Zhou, Jian and Fan, Jia and Wang, Hong-Wei and Shi, Ying-Hong},
+  title     = {Tumor immune microenvironment and genomic evolution in a patient with mixed hepatocellular carcinoma and cholangiocarcinoma},
+  journal   = {Journal for ImmunoTherapy of Cancer},
+  year      = {2020},
+  volume    = {8},
+  number    = {2},
+  pages     = {e000155},
+  doi       = {10.1136/jitc-2019-000155},
+  note      = {混合型肝细胞-胆管癌不同组织学成分间存在显著的免疫微环境异质性，为 CHC20 中免疫模块与基质/ECM 模块呈现空间部分分离而非完全重叠的现象提供了机制背景}
+}
+
+@article{tirosh2016dissecting,
+  author    = {Tirosh, Itay and Izar, Benjamin and Prakadan, Sanjay M. and Wadsworth, Marc H. and Treacy, Daniel and Trombetta, John J. and Rotem, Asaf and Rodman, Christopher and Lian, Christine and Murphy, George and Fallahi-Sichani, Mohammad and Dutton-Regester, Ken and Lin, Jia-Ren and Cohen, Ofir and Shah, Parin and Lu, Diana and Genshaft, Alex S. and Hughes, Travis K. and Ziegler, Carly G. K. and Kazer, Samuel W. and Gaillard, Aleth and Kolb, Kellie E. and Villani, Alexandra-Chloe and Johannessen, Cory M. and Andreev, Aleksandr Y. and Van Allen, Eliezer M. and Bertagnolli, Monica and Sorger, Peter K. and Sullivan, Ryan J. and Flaherty, Keith T. and Frederick, Dennie T. and Jane-Valbuena, Judit and Yoon, Charles H. and Rozenblatt-Rosen, Orit and Shalek, Alex K. and Regev, Aviv and Garraway, Levi A.},
+  title     = {Dissecting the multicellular ecosystem of metastatic melanoma by single-cell {RNA}-seq},
+  journal   = {Science},
+  year      = {2016},
+  volume    = {352},
+  number    = {6282},
+  pages     = {189--196},
+  doi       = {10.1126/science.aad0501},
+  note      = {首次系统提出以模块基因集平均表达（module score）量化空间/单细胞水平特定生物学程序活性的方法学范式，为本研究将 HCC4R 提取的免疫/基质双模块基因集以相同公式在 CHC20 上重新计算评分、实现跨样本可比性的策略提供了方法学先例}
+}
+
+@article{barkas2019joint,
+  author    = {Barkas, Nikolas and Petukhov, Viktor and Nikolaeva, Daria and Lozinsky, Yaroslav and Demharter, Samuel and Khodosevich, Konstantin and Kharchenko, Peter V.},
+  title     = {Joint analysis of heterogeneous single-cell {RNA}-seq dataset collections},
+  journal   = {Nature Methods},
+  year      = {2019},
+  volume    = {16},
+  number    = {8},
+  pages     = {695--698},
+  doi       = {10.1038/s41592-019-0466-z},
+  note      = {提出跨数据集联合分析中以共享特征基因集而非重新聚类的方式实现标签/评分迁移的策略，支持本研究以 HCC4R 签名基因集直接在独立切片 CHC20 上计算评分（而非在 CHC20 中重新进行两层筛选）以实现严格意义上的跨样本外部验证这一设计选择}
+}
