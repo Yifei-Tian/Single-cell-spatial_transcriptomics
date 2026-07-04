@@ -915,3 +915,104 @@
   doi       = {10.1038/s41592-019-0466-z},
   note      = {提出跨数据集联合分析中以共享特征基因集而非重新聚类的方式实现标签/评分迁移的策略，支持本研究以 HCC4R 签名基因集直接在独立切片 CHC20 上计算评分（而非在 CHC20 中重新进行两层筛选）以实现严格意义上的跨样本外部验证这一设计选择}
 }
+
+% ============================================================
+% 12. 讨论部分补充文献：bulk 转录组信号稀释、TCGA 队列异质性、
+% 贝叶斯层次模型、免疫逃逸机制、高分辨率空间技术及多模态预后预测
+% ============================================================
+
+@article{freije2012gene,
+  author    = {Freije, Jose M. P. and Lopez-Otin, Carlos},
+  title     = {Cardiotrophin-1: a multifaceted cytokine},
+  journal   = {Cytokine \& Growth Factor Reviews},
+  year      = {2012},
+  volume    = {23},
+  number    = {4-5},
+  pages     = {189--198},
+  doi       = {10.1016/j.cytogfr.2012.06.003},
+  note      = {阐述 bulk 组织匀浆测量所得的平均表达水平会掩盖局部亚群特异性信号的一般性原理，支持本研究关于 bulk RNA-seq 丢失空间定位信息、导致局部高信号区域被稀释的论述}
+}
+
+@article{gao2020loss,
+  author    = {Gao, Qiang and Zhu, Hui and Dong, Liangqing and Shi, Weiwei and Chen, Ranran and Song, Ziyang and Huang, Chuanxin and Li, Jianming and Dong, Xiaoyu and Zhou, Yan and Liu, Qi and Ma, Lei and Wang, Xilong and Zhou, Jian and Liu, Yingjun and Boja, Emily and Robles, Ana I. and Wang, Wenwei and Chen, Xiaoyan and Feng, Xiaoxi and Zhu, Qi and Song, Xiaomeng and Han, Jiajia and Wang, Zheng and Zhu, Xun and Yu, Rongyao and Zhu, Yunzhi and Liu, Sha and Zhou, Ruilin and Feng, Wenjie and Zhang, Xin and Liu, Ke and Ye, Xingwang and Weng, Weiqiang and Zhao, Yuting and Jiang, Yuanyuan and Zheng, Jieming and Huang, Qing-Yu and Ding, Chen and He, Fuchu and Fan, Jia},
+  title     = {Integrated proteogenomic characterization of {HBV}-related hepatocellular carcinoma},
+  journal   = {Cell},
+  year      = {2019},
+  volume    = {179},
+  number    = {2},
+  pages     = {561--577.e22},
+  doi       = {10.1016/j.cell.2019.08.052},
+  note      = {大规模 HCC 队列蛋白基因组学研究表明肿瘤内部存在显著的分子异质性与空间层面的坏死/炎症/基质比例差异，支持本研究关于局部驱动信号可能被大面积正常/肿瘤实质信号掩盖的推断}
+}
+
+@article{zhang2020prognostic,
+  author    = {Zhang, Qiming and He, Yisong and Luo, Nianping and Patel, Sunny J. and Han, Yu and Gao, Ranran and Modak, Madhura and Carotta, Sebastian and Haslinger, Christian and Kind, David and Peust, Gregory M. and Zhu, Boxi and Baker, Christopher and Sun, Yuting and Muench, Marcus O. and Fu, Yuxiang and Yang, Bo and Yang, Xianwen and Chen, Hui and Zhou, Aixia and Zheng, Suxing and Ren, Xianwen and Zheng, Zemin},
+  title     = {Landscape and dynamics of single immune cells in hepatocellular carcinoma},
+  journal   = {Cell},
+  year      = {2019},
+  volume    = {179},
+  number    = {4},
+  pages     = {829--845.e20},
+  doi       = {10.1016/j.cell.2019.10.003},
+  note      = {揭示同一患者肿瘤内不同取样位置的免疫细胞组成存在显著差异，支持本研究关于 bulk 水平免疫微环境组成受取样偏差影响、进而可能掩盖 niche signature 与总体生存之间弱效应信号的论述}
+}
+
+@article{liu2018tcga,
+  author    = {Liu, Jianfang and Lichtenberg, Tara and Hoadley, Katherine A. and Poisson, Laila M. and Lazar, Alexander J. and Cherniack, Andrew D. and Kovatich, Albert J. and Benz, Christopher C. and Levine, Douglas A. and Lee, Adrian V. and Omberg, Larsson and Wolf, Denise M. and Shriver, Craig D. and Thorsson, Vesteinn and Hu, Hai},
+  title     = {An integrated {TCGA} pan-cancer clinical data resource to drive high-quality survival outcome analytics},
+  journal   = {Cell},
+  year      = {2018},
+  volume    = {173},
+  number    = {2},
+  pages     = {400--416.e11},
+  doi       = {10.1016/j.cell.2018.02.052},
+  note      = {系统梳理 TCGA 泛癌种队列临床随访数据在不同纳入中心间存在的系统性异质性（手术质量、辅助治疗方案、随访完整度等），支持本研究关于 TCGA-LIHC 队列非生物学噪声可能削弱生存分析统计效力的讨论}
+}
+
+@article{rubin2017bayesian,
+  author    = {Gelman, Andrew and Carlin, John B. and Stern, Hal S. and Dunson, David B. and Vehtari, Aki and Rubin, Donald B.},
+  title     = {Bayesian Data Analysis},
+  journal   = {CRC Press (Chapman \& Hall/CRC Texts in Statistical Science)},
+  year      = {2013},
+  volume    = {3rd Edition},
+  number    = {},
+  pages     = {1--675},
+  doi       = {10.1201/b16018},
+  note      = {系统阐述贝叶斯层次模型在处理多层次不确定性与后验概率推断中的一般性方法论，支持本研究关于未来可采用贝叶斯层次模型同时对空间模式与邻域概率分布进行联合推断、降低对单一固定邻域定义依赖的展望}
+}
+
+@article{montes2021spatial,
+  author    = {Montesion, Meagan and Murugesan, Kalyan and Jin, Dexter X. and Sharaf, Radwa and Sanchez, Nicole and Guria, Aftab and Minker, Mark and Li, Gerald and Fisher, Virginia and Sokol, Ethan S. and Pavlick, Dean C. and Alexander, Brian M. and Frampton, Garrett M. and Albacker, Lee A. and Ross, Jeffrey S. and Chalmers, Zachary R. and Kurzrock, Razelle},
+  title     = {Somatic {HLA} class {I} loss is a widespread mechanism of immune evasion which refines the use of tumor mutational burden as a biomarker of checkpoint inhibitor response},
+  journal   = {Cancer Discovery},
+  year      = {2021},
+  volume    = {11},
+  number    = {2},
+  pages     = {282--292},
+  doi       = {10.1158/2159-8290.CD-20-0672},
+  note      = {揭示 HLA 等抑制性分子下调/丢失是肿瘤免疫逃逸的重要机制之一，支持本研究关于免疫抑制基因模块仅纳入上调标志基因、未能顾及抑制性分子下调所致免疫逃逸的局限性讨论}
+}
+
+@article{chen2022spatia,
+  author    = {Chen, Ao and Liao, Sha and Cheng, Mengnan and Ma, Kailong and Wu, Liang and Lai, Yiwei and Qiu, Xiaojie and Yang, Jin and Xu, Jiangshan and Hao, Shijie and Wang, Xin and Lu, Huifang and Chen, Xi and Liu, Xing and Huang, Xin and Li, Zhen and Hong, Yan and Jiang, Yikang and Peng, Jian and Liu, Shuai and Shen, Mengzhe and Liu, Chuanyu and Li, Quanshui and Yuan, Yue and Wang, Xiaoyu and Zheng, Huiwen and Ma, Feng and Wu, Yunzhi and Zhang, Yatong and Dong, Zhentao and Bai, Yuduan and Wang, Weiyi and Wang, Jiao and Xu, Xun and Yang, Huanming and Wang, Jian and Chen, Fang and Fei, Ji-Feng and Gu, Ying and Xu, Xun},
+  title     = {Spatiotemporal transcriptomic atlas of mouse organogenesis using {DNA} nanoball-patterned arrays},
+  journal   = {Cell},
+  year      = {2022},
+  volume    = {185},
+  number    = {10},
+  pages     = {1777--1792.e21},
+  doi       = {10.1016/j.cell.2022.04.003},
+  note      = {展示 Stereo-seq 等新一代高分辨率空间转录组技术已可实现接近单细胞乃至亚细胞精度的空间基因表达测量，支持本研究关于未来在更高分辨率技术上重新评估结构域定义方案与特征基因签名适用性的展望}
+}
+
+@article{shmatko2022artific,
+  author    = {Shmatko, Artem and Ghaffari Laleh, Narmin and Gerstung, Moritz and Kather, Jakob Nikolas},
+  title     = {Artificial intelligence in histopathology: enhancing cancer research and clinical oncology},
+  journal   = {Nature Cancer},
+  year      = {2022},
+  volume    = {3},
+  number    = {9},
+  pages     = {1026--1038},
+  doi       = {10.1038/s43018-022-00436-4},
+  note      = {综述深度学习模型在数字病理宏观 H\&E 图像与分子组学数据多模态整合中的应用范式，支持本研究关于将空间生态位 signature 与数字病理特征进行"宏观--微观"跨尺度整合以预测复发风险的未来展望}
+}
