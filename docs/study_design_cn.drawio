@@ -1,31 +1,29 @@
 <mxfile host="app.diagrams.net">
   <diagram id="d6PSF3mO2LgQcCYAgCNT-cn" name="研究设计（中文版）">
-    <mxGraphModel dx="1414" dy="777" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1900" pageHeight="1150" background="#ffffff" math="0" shadow="0">
+    <mxGraphModel dx="1885" dy="1036" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1900" pageHeight="1150" background="#ffffff" math="0" shadow="0">
       <root>
         <mxCell id="0" />
         <mxCell id="1" parent="0" />
         <mxCell id="title" parent="1" style="text;html=1;align=center;verticalAlign=middle;resizable=0;points=[];autosize=1;strokeColor=none;fillColor=none;fontStyle=1;fontSize=16;fontColor=#3c3c3c;" value="&lt;font style=&quot;font-size: 20px;&quot;&gt;研究设计：肝细胞癌空间免疫抑制生态位分析&lt;/font&gt;" vertex="1">
-          <mxGeometry height="40" width="700" x="600" y="58" as="geometry" />
+          <mxGeometry height="40" width="700" x="539" y="62" as="geometry" />
         </mxCell>
-
-        <!-- ============ 第一列：scRNA-seq 参考构建 ============ -->
         <mxCell id="col1_box" parent="1" style="rounded=1;whiteSpace=wrap;html=1;strokeWidth=1.5;strokeColor=#A0BCD8;fillColor=none;dashed=1;dashPattern=8 4;arcSize=3;" value="" vertex="1">
-          <mxGeometry height="490" width="320" x="140" y="153" as="geometry" />
+          <mxGeometry height="490" width="280" x="219" y="153" as="geometry" />
         </mxCell>
         <mxCell id="col1_title" parent="1" style="text;html=1;align=center;verticalAlign=middle;resizable=0;points=[];autosize=1;strokeColor=none;fillColor=#ffffff;fontStyle=1;fontSize=13;fontColor=#5A7FA0;labelBackgroundColor=#ffffff;" value="&lt;font style=&quot;font-size: 16px;&quot;&gt;① 单细胞参考图谱构建&lt;/font&gt;" vertex="1">
-          <mxGeometry height="30" width="220" x="190" y="138" as="geometry" />
+          <mxGeometry height="30" width="220" x="247" y="138" as="geometry" />
         </mxCell>
         <mxCell id="n1_1" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8F0F8;strokeColor=#C0D4E8;fontColor=#3C5A78;fontSize=11;fontStyle=0;arcSize=20;strokeWidth=1;" value="&lt;font style=&quot;font-size: 14px;&quot;&gt;肝癌 scRNA-seq 数据&lt;br&gt;（GSE149614，多细胞类型图谱）&lt;/font&gt;" vertex="1">
-          <mxGeometry height="60" width="220" x="190" y="193" as="geometry" />
+          <mxGeometry height="60" width="220" x="248" y="193" as="geometry" />
         </mxCell>
         <mxCell id="n1_2" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8F0F8;strokeColor=#C0D4E8;fontColor=#3C5A78;fontSize=11;fontStyle=0;arcSize=20;strokeWidth=1;" value="&lt;font style=&quot;font-size: 14px;&quot;&gt;质控与细胞聚类&lt;br&gt;（肝细胞/T-NK/髓系/&lt;br&gt;成纤维/B/内皮细胞）&lt;/font&gt;" vertex="1">
-          <mxGeometry height="66" width="220" x="190" y="313" as="geometry" />
+          <mxGeometry height="66" width="220" x="248" y="313" as="geometry" />
         </mxCell>
         <mxCell id="n1_3" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8F0F8;strokeColor=#C0D4E8;fontColor=#3C5A78;fontSize=11;fontStyle=0;arcSize=20;strokeWidth=1;" value="&lt;font style=&quot;font-size: 14px;&quot;&gt;T/NK 亚群高分辨率聚类&lt;br&gt;（Leiden res=3.0）与&lt;br&gt;Treg 亚群鉴定（CD4+CD25+FOXP3+）&lt;/font&gt;" vertex="1">
-          <mxGeometry height="66" width="220" x="190" y="439" as="geometry" />
+          <mxGeometry height="85" width="220" x="248" y="429" as="geometry" />
         </mxCell>
         <mxCell id="n1_4" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#D6E4F0;strokeColor=#A8C4DC;fontColor=#3C5A78;fontSize=11;fontStyle=1;arcSize=20;strokeWidth=1;" value="&lt;font style=&quot;font-size: 14px;&quot;&gt;细胞类型参考签名矩阵&lt;br&gt;（回归模型）&lt;/font&gt;" vertex="1">
-          <mxGeometry height="60" width="220" x="190" y="565" as="geometry" />
+          <mxGeometry height="60" width="220" x="248" y="565" as="geometry" />
         </mxCell>
         <mxCell id="e1_1" edge="1" parent="1" source="n1_1" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;strokeColor=#B0C8E0;strokeWidth=1;endArrow=classic;endSize=5;" target="n1_2">
           <mxGeometry relative="1" as="geometry" />
@@ -36,25 +34,23 @@
         <mxCell id="e1_3" edge="1" parent="1" source="n1_3" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;strokeColor=#B0C8E0;strokeWidth=1;endArrow=classic;endSize=5;" target="n1_4">
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
-
-        <!-- ============ 第二列：空间反卷积与生态位识别 ============ -->
         <mxCell id="col2_box" parent="1" style="rounded=1;whiteSpace=wrap;html=1;strokeWidth=1.5;strokeColor=#D4AA8A;fillColor=none;dashed=1;dashPattern=8 4;arcSize=3;" value="" vertex="1">
-          <mxGeometry height="490" width="340" x="520" y="153" as="geometry" />
+          <mxGeometry height="490" width="300" x="560" y="153" as="geometry" />
         </mxCell>
         <mxCell id="col2_title" parent="1" style="text;html=1;align=center;verticalAlign=middle;resizable=0;points=[];autosize=1;strokeColor=none;fillColor=#ffffff;fontStyle=1;fontSize=13;fontColor=#9A6E50;labelBackgroundColor=#ffffff;" value="&lt;font style=&quot;font-size: 16px;&quot;&gt;② 空间反卷积与生态位识别&lt;/font&gt;" vertex="1">
-          <mxGeometry height="30" width="320" x="530" y="138" as="geometry" />
+          <mxGeometry height="30" width="320" x="550" y="140" as="geometry" />
         </mxCell>
         <mxCell id="n2_1" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F8EDE4;strokeColor=#E0CCBA;fontColor=#7A5A3E;fontSize=11;fontStyle=0;arcSize=20;strokeWidth=1;" value="&lt;font style=&quot;font-size: 14px;&quot;&gt;HCC4R Visium 切片&lt;br&gt;（发现集，GSE238264）&lt;/font&gt;" vertex="1">
-          <mxGeometry height="60" width="240" x="530" y="193" as="geometry" />
+          <mxGeometry height="60" width="240" x="588" y="193" as="geometry" />
         </mxCell>
         <mxCell id="n2_2" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F0EBE6;strokeColor=#D8D0C8;fontColor=#5A4E42;fontSize=11;fontStyle=0;arcSize=20;strokeWidth=1;" value="&lt;font style=&quot;font-size: 14px;&quot;&gt;Cell2location 贝叶斯反卷积&lt;br&gt;（spot 级细胞丰度）&lt;/font&gt;" vertex="1">
-          <mxGeometry height="60" width="240" x="530" y="313" as="geometry" />
+          <mxGeometry height="60" width="240" x="588" y="313" as="geometry" />
         </mxCell>
         <mxCell id="n2_3" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F0EBE6;strokeColor=#D8D0C8;fontColor=#5A4E42;fontSize=11;fontStyle=0;arcSize=20;strokeWidth=1;" value="&lt;font style=&quot;font-size: 14px;&quot;&gt;&lt;b&gt;空间生态位识别&lt;/b&gt;&lt;br&gt;邻域组成 k-NN 图&lt;br&gt;+ Leiden 聚类&lt;/font&gt;" vertex="1">
-          <mxGeometry height="66" width="240" x="530" y="433" as="geometry" />
+          <mxGeometry height="66" width="240" x="588" y="433" as="geometry" />
         </mxCell>
         <mxCell id="n2_4" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F8EDE4;strokeColor=#E0CCBA;fontColor=#7A5A3E;fontSize=11;fontStyle=1;arcSize=20;strokeWidth=1;" value="&lt;font style=&quot;font-size: 14px;&quot;&gt;两层特征基因签名筛选&lt;br&gt;（Wilcoxon/AUC +&lt;br&gt;先验功能基因集）&lt;/font&gt;" vertex="1">
-          <mxGeometry height="66" width="240" x="530" y="565" as="geometry" />
+          <mxGeometry height="66" width="240" x="588" y="565" as="geometry" />
         </mxCell>
         <mxCell id="e2_1" edge="1" parent="1" source="n2_1" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;strokeColor=#D4B8A0;strokeWidth=1;endArrow=classic;endSize=5;" target="n2_2">
           <mxGeometry relative="1" as="geometry" />
@@ -65,42 +61,38 @@
         <mxCell id="e2_3" edge="1" parent="1" source="n2_3" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;strokeColor=#D4B8A0;strokeWidth=1;endArrow=classic;endSize=5;" target="n2_4">
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
-
-        <!-- ============ 第三列：机制解析与跨切片验证（两条并行分支） ============ -->
         <mxCell id="col3_box" parent="1" style="rounded=1;whiteSpace=wrap;html=1;strokeWidth=1.5;strokeColor=#B79ACC;fillColor=none;dashed=1;dashPattern=8 4;arcSize=3;" value="" vertex="1">
-          <mxGeometry height="490" width="320" x="940" y="153" as="geometry" />
+          <mxGeometry height="490" width="300" x="920" y="153" as="geometry" />
         </mxCell>
         <mxCell id="col3_title" parent="1" style="text;html=1;align=center;verticalAlign=middle;resizable=0;points=[];autosize=1;strokeColor=none;fillColor=#ffffff;fontStyle=1;fontSize=13;fontColor=#7A5A99;labelBackgroundColor=#ffffff;" value="&lt;font style=&quot;font-size: 16px;&quot;&gt;③ 机制解析与跨切片验证&lt;/font&gt;" vertex="1">
-          <mxGeometry height="30" width="280" x="960" y="138" as="geometry" />
+          <mxGeometry height="30" width="280" x="929" y="138" as="geometry" />
         </mxCell>
         <mxCell id="n3a_1" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F1E8F5;strokeColor=#D8C0E8;fontColor=#5A3E78;fontSize=11;fontStyle=0;arcSize=20;strokeWidth=1;" value="&lt;font style=&quot;font-size: 14px;&quot;&gt;配体-受体通讯分析&lt;br&gt;（Treg--TAM--CAF 轴机制解析）&lt;/font&gt;" vertex="1">
-          <mxGeometry height="66" width="240" x="950" y="230" as="geometry" />
+          <mxGeometry height="66" width="240" x="948" y="230" as="geometry" />
         </mxCell>
         <mxCell id="n3b_1" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FDF3E0;strokeColor=#E8D8B8;fontColor=#6B5020;fontSize=11;fontStyle=0;arcSize=20;strokeWidth=1;" value="&lt;font style=&quot;font-size: 14px;&quot;&gt;CHC20 Visium 切片&lt;br&gt;（独立验证集）&lt;/font&gt;" vertex="1">
-          <mxGeometry height="60" width="240" x="950" y="433" as="geometry" />
+          <mxGeometry height="60" width="240" x="948" y="433" as="geometry" />
         </mxCell>
         <mxCell id="n3b_2" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FDF3E0;strokeColor=#E8D8B8;fontColor=#6B5020;fontSize=11;fontStyle=1;arcSize=20;strokeWidth=1;" value="&lt;font style=&quot;font-size: 14px;&quot;&gt;双模块评分投影&lt;br&gt;与空间复现验证&lt;/font&gt;" vertex="1">
-          <mxGeometry height="60" width="240" x="950" y="565" as="geometry" />
+          <mxGeometry height="60" width="240" x="948" y="565" as="geometry" />
         </mxCell>
         <mxCell id="e3b_1" edge="1" parent="1" source="n3b_1" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;strokeColor=#D4B8A0;strokeWidth=1;endArrow=classic;endSize=5;" target="n3b_2">
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
-
-        <!-- ============ 第四列：临床验证 ============ -->
         <mxCell id="col4_box" parent="1" style="rounded=1;whiteSpace=wrap;html=1;strokeWidth=1.5;strokeColor=#8CC08C;fillColor=none;dashed=1;dashPattern=8 4;arcSize=3;" value="" vertex="1">
-          <mxGeometry height="490" width="320" x="1340" y="153" as="geometry" />
+          <mxGeometry height="490" width="291" x="1279" y="153" as="geometry" />
         </mxCell>
         <mxCell id="col4_title" parent="1" style="text;html=1;align=center;verticalAlign=middle;resizable=0;points=[];autosize=1;strokeColor=none;fillColor=#ffffff;fontStyle=1;fontSize=13;fontColor=#4A7A4A;labelBackgroundColor=#ffffff;" value="&lt;font style=&quot;font-size: 16px;&quot;&gt;④ 临床预后验证&lt;/font&gt;" vertex="1">
-          <mxGeometry height="30" width="180" x="1400" y="138" as="geometry" />
+          <mxGeometry height="30" width="180" x="1333" y="138" as="geometry" />
         </mxCell>
         <mxCell id="n4_1" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E6F2E6;strokeColor=#BCD8BC;fontColor=#3A6A3A;fontSize=11;fontStyle=0;arcSize=20;strokeWidth=1;" value="&lt;font style=&quot;font-size: 14px;&quot;&gt;TCGA-LIHC 队列&lt;br&gt;（约 370 例患者）&lt;/font&gt;" vertex="1">
-          <mxGeometry height="60" width="230" x="1385" y="313" as="geometry" />
+          <mxGeometry height="60" width="230" x="1308" y="313" as="geometry" />
         </mxCell>
         <mxCell id="n4_2" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E6F2E6;strokeColor=#BCD8BC;fontColor=#3A6A3A;fontSize=11;fontStyle=0;arcSize=20;strokeWidth=1;" value="&lt;font style=&quot;font-size: 14px;&quot;&gt;ssGSEA 评分&lt;br&gt;（生态位签名基因）&lt;/font&gt;" vertex="1">
-          <mxGeometry height="60" width="230" x="1385" y="433" as="geometry" />
+          <mxGeometry height="60" width="230" x="1308" y="433" as="geometry" />
         </mxCell>
         <mxCell id="n4_3" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#D0E8D0;strokeColor=#A0C8A0;fontColor=#3A6A3A;fontSize=11;fontStyle=1;arcSize=20;strokeWidth=1;" value="&lt;font style=&quot;font-size: 14px;&quot;&gt;多变量 Cox 回归&lt;br&gt;&amp;amp; Kaplan-Meier 生存曲线&lt;/font&gt;" vertex="1">
-          <mxGeometry height="60" width="230" x="1385" y="565" as="geometry" />
+          <mxGeometry height="60" width="230" x="1308" y="565" as="geometry" />
         </mxCell>
         <mxCell id="e4_1" edge="1" parent="1" source="n4_1" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;strokeColor=#A0C8A0;strokeWidth=1;endArrow=classic;endSize=5;" target="n4_2">
           <mxGeometry relative="1" as="geometry" />
@@ -108,9 +100,6 @@
         <mxCell id="e4_2" edge="1" parent="1" source="n4_2" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;strokeColor=#A0C8A0;strokeWidth=1;endArrow=classic;endSize=5;" target="n4_3">
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
-
-        <!-- ============ 跨列连接线 ============ -->
-        <!-- 参考签名矩阵 -> Cell2location -->
         <mxCell id="cross_1" edge="1" parent="1" source="n1_4" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;strokeColor=#AAAAAA;strokeWidth=1;dashed=1;dashPattern=6 4;endArrow=classic;endSize=4;" target="n2_2">
           <mxGeometry relative="1" as="geometry">
             <Array as="points">
@@ -123,8 +112,6 @@
             <mxPoint y="-10" as="offset" />
           </mxGeometry>
         </mxCell>
-
-        <!-- 生态位识别 -> 配体受体通讯分析（机制分支） -->
         <mxCell id="cross_2" edge="1" parent="1" source="n2_3" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=1;exitY=0.3;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;strokeColor=#AAAAAA;strokeWidth=1;dashed=1;dashPattern=6 4;endArrow=classic;endSize=4;" target="n3a_1">
           <mxGeometry relative="1" as="geometry">
             <Array as="points">
@@ -133,12 +120,10 @@
           </mxGeometry>
         </mxCell>
         <mxCell id="cross_2_label" connectable="0" parent="cross_2" style="edgeLabel;html=1;align=center;verticalAlign=middle;resizable=0;points=[];fontSize=9;fontColor=#999999;fontStyle=2;labelBackgroundColor=#ffffff;" value="&lt;font style=&quot;font-size: 12px;&quot;&gt;niche_high / niche_low 分组&lt;/font&gt;" vertex="1">
-          <mxGeometry relative="1" x="0" y="-1" as="geometry">
+          <mxGeometry relative="1" y="-1" as="geometry">
             <mxPoint y="-10" as="offset" />
           </mxGeometry>
         </mxCell>
-
-        <!-- 签名基因 -> CHC20 双模块验证分支 -->
         <mxCell id="cross_3" edge="1" parent="1" source="n2_4" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;strokeColor=#AAAAAA;strokeWidth=1;dashed=1;dashPattern=6 4;endArrow=classic;endSize=4;" target="n3b_2">
           <mxGeometry relative="1" as="geometry">
             <Array as="points">
@@ -147,12 +132,10 @@
           </mxGeometry>
         </mxCell>
         <mxCell id="cross_3_label" connectable="0" parent="cross_3" style="edgeLabel;html=1;align=center;verticalAlign=middle;resizable=0;points=[];fontSize=9;fontColor=#999999;fontStyle=2;labelBackgroundColor=#ffffff;" value="&lt;font style=&quot;font-size: 12px;&quot;&gt;签名基因&lt;/font&gt;" vertex="1">
-          <mxGeometry relative="1" x="0" y="-1" as="geometry">
+          <mxGeometry relative="1" y="-1" as="geometry">
             <mxPoint y="-10" as="offset" />
           </mxGeometry>
         </mxCell>
-
-        <!-- 签名基因 -> TCGA ssGSEA -->
         <mxCell id="cross_4" edge="1" parent="1" source="n2_4" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=1;exitY=0.7;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;strokeColor=#AAAAAA;strokeWidth=1;dashed=1;dashPattern=6 4;endArrow=classic;endSize=4;" target="n4_2">
           <mxGeometry relative="1" as="geometry">
             <Array as="points">
@@ -162,11 +145,10 @@
           </mxGeometry>
         </mxCell>
         <mxCell id="cross_4_label" connectable="0" parent="cross_4" style="edgeLabel;html=1;align=center;verticalAlign=middle;resizable=0;points=[];fontSize=9;fontColor=#999999;fontStyle=2;labelBackgroundColor=#ffffff;" value="&lt;font style=&quot;font-size: 12px;&quot;&gt;签名基因&lt;/font&gt;" vertex="1">
-          <mxGeometry relative="1" x="0" y="1" as="geometry">
-            <mxPoint y="12" as="offset" />
+          <mxGeometry relative="1" y="1" as="geometry">
+            <mxPoint x="38" y="12" as="offset" />
           </mxGeometry>
         </mxCell>
-
       </root>
     </mxGraphModel>
   </diagram>
