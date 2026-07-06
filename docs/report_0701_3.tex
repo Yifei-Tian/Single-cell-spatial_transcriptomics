@@ -74,8 +74,8 @@
     免疫抑制微环境空间解析与预后验证}\\[0.5em]
     \large 项目技术报告
 }
-\author{}
-\date{\today}
+\author{南开大学\ 田一菲}
+\date{}
 
 % ============================================================
 % 正文开始
@@ -86,22 +86,7 @@
 \thispagestyle{empty}
 
 \begin{abstract}
-肝细胞癌（Hepatocellular Carcinoma，HCC）是全球癌症相关死亡的第三大原因，
-免疫检查点抑制剂的临床有效率仅约15\%--20\%，
-核心瓶颈在于肿瘤微环境中调节性 T 细胞（Treg）、
-肿瘤相关巨噬细胞（TAM）与肿瘤相关成纤维细胞（CAF）所共同构建的多层次免疫抑制网络~\citep{llovet2021hepatocellular,finn2020atezolizumab}。
-本项目整合单细胞转录组（scRNA-seq）与 10x Genomics Visium 空间转录组数据，
-以 Cell2location 贝叶斯反卷积算法~\citep{kleshchevnikov2022cell2location}
-将细胞类型注释精确映射至空间切片的每个 spot，
-并采用基于 Schürch 等人"细胞邻域（Cellular Neighborhoods）"
-框架~\citep{schurch2020coordinated}的邻域组成聚类策略，
-在不依赖先验阈值的前提下识别免疫抑制空间生态位。
-通过配体-受体通讯定量分析~\citep{efremova2020cellphonedb}
-揭示 Treg--TAM--CAF 轴核心信号通路（CXCL12--CXCR4、CCL22--CCR4、TGFB1--TGFBR1、PD-1--PD-L1），
-利用两张独立 Visium 切片（HCC4R 与 CHC20）验证跨样本一致性，
-并以 ssGSEA 方法将提取的空间特征基因签名投影至 TCGA-LIHC 队列
-（约370例患者）~\citep{tomczak2015cancer}进行独立预后验证。
-本项目建立了从空间精细解析到机制性通讯分析再到临床队列验证的完整转化分析框架。
+肝细胞癌是全球癌症相关死亡的第三大原因，免疫检查点抑制剂的临床有效率仅约15\%--20\%，核心瓶颈在于肿瘤微环境中调节性 T 细胞（Treg）、肿瘤相关巨噬细胞（TAM）与肿瘤相关成纤维细胞（CAF）所共同构建的多层次免疫抑制网络。本项目整合单细胞转录组与 10x Genomics Visium 空间转录组数据，以 Cell2location 贝叶斯反卷积算法将细胞类型注释精确映射至空间切片的每个 spot，并采用基于 Schürch 等人``细胞邻域"框架的邻域组成聚类策略，在不依赖先验阈值的前提下识别免疫抑制空间生态位。通过配体-受体通讯定量分析揭示 Treg--TAM--CAF 轴核心信号通路（CXCL12--CXCR4、CCL22--CCR4、TGFB1--TGFBR1、PD-1--PD-L1），利用两张独立 Visium 切片（HCC4R 与 CHC20）验证跨样本一致性，并以 ssGSEA 方法将提取的空间特征基因签名投影至 TCGA-LIHC 队列（约370例患者）进行独立预后验证。本项目建立了从空间精细解析到机制性通讯分析再到临床队列验证的完整转化分析框架。
 
 \noindent\textbf{关键词：}
 肝细胞癌；空间转录组；单细胞转录组；免疫抑制微环境；Cell2location；
@@ -133,7 +118,7 @@ HCC 微环境中的免疫抑制由多种细胞协同构建。调节性 T 细胞�
 单细胞转录组研究表明 Treg 在肝癌组织中显著富集，
 Treg 与 CD$8^+$ T 细胞的比值是独立预后因子~\citep{zheng2017landscape}。
 以 M2 极化表型（CD163$^+$MRC1$^+$）为主的肿瘤相关巨噬细胞（TAM）通过 CCL22--CCR4 和 CXCL12--CXCR4 轴
-主动招募 Treg 进入肿瘤区域，同时分泌 TGF-$\beta$ 并高表达 PD-L1 以抑制效应性 T 细胞~\citep{biswas2010macrophage,noy2014tumor}；
+主动招募 Treg 进入肿瘤区域，同时分泌 TGF-$\beta$ 并高表达 PD-L1 以抑制效应性 T 细胞~\citep{noy2014tumor}；
 TAM 与 Treg 之间的双向正反馈循环共同维持了稳定的局部免疫抑制生态。
 以 FAP、ACTA2 和 POSTN 为标志的肿瘤相关成纤维细胞（CAF）则通过分泌 CXCL12 招募免疫抑制细胞，
 并通过重塑细胞外基质（ECM）形成物理屏障阻碍效应性 T 细胞浸润~\citep{kalluri2016biology,mariathasan2018tgfb}。
@@ -154,13 +139,13 @@ scRNA-seq 虽能解析单细胞转录特征，但在组织解离过程中不可�
 在当前主流反卷积工具中，Cell2location 基于负二项贝叶斯层次模型，
 在全基因组范围内同时估计多种细胞类型的绝对丰度，并提供后验不确定性量化~\citep{kleshchevnikov2022cell2location}；
 多项独立基准测试一致表明，它在稀有细胞类型（如 Treg，比例通常 $<$5\%）检测上
-优于 RCTD~\citep{cable2021robust}、CARD~\citep{ma2022integrative} 和 Tangram~\citep{biancalani2021deep}~\citep{li2022benchmarking,sang2023spotless,yan2023benchmarking}。
-Schürch 等人在结直肠癌中发展的"细胞邻域"概念，
+优于 RCTD~\citep{cable2021robust}、CARD~\citep{ma2022integrative} 和 Tangram~\citep{biancalani2021deep,li2022benchmarking,sang2024spotless,yan2023benchmarking}。
+Schürch 等人在结直肠癌中发展的``细胞邻域"概念，
 通过对局部细胞组成进行无监督聚类揭示不同 neighborhood 对抗肿瘤免疫的差异化贡献，
 为空间分辨率下的肿瘤微环境分型提供了方法学范式~\citep{schurch2020coordinated}。
 在此基础上，将空间转录组局部特征基因签名通过 ssGSEA~\citep{barbie2009systematic}
 投影至大规模临床队列，结合多变量 Cox 回归~\citep{cox1972regression}
-进行独立预后验证，是当前实现"空间发现--临床转化"的经典策略~\citep{hanzelmann2013gsva}。
+进行独立预后验证，是当前实现``空间发现--临床转化"的经典策略~\citep{hanzelmann2013gsva}。
 
 现有 HCC 研究仍普遍缺少三个维度的整合：
 在保留空间信息的前提下，将 Treg--TAM--CAF 轴的共定位从描述性层面提升至配体-受体通讯机制层面；
@@ -186,7 +171,7 @@ Schürch 等人在结直肠癌中发展的"细胞邻域"概念，
 
 \subsection{整体分析流程}
 
-本研究建立了一套贯穿``单细胞参考构建--空间反卷积--生态位识别--机制解析--跨样本与临床验证"五个阶段的完整转化分析框架（图~\ref{fig:workflow}）。整体流程以 scRNA-seq 参考图谱为起点，经 Cell2location 贝叶斯反卷积将细胞类型丰度映射至 Visium 空间切片的每个 spot；随后基于空间邻域组成的无监督聚类识别免疫抑制生态位，并通过两层次差异表达筛选提炼生态位特征基因签名；在此基础上分别开展配体-受体通讯定量分析（机制层面）、独立切片 CHC20 的跨样本复现验证（空间层面）以及 TCGA-LIHC 大队列的 ssGSEA 投影与多变量 Cox 生存分析（临床层面），三条分析支线相互独立又共同指向同一组生态位特征基因签名，从而构成"发现--机制--验证"的闭环证据链。各阶段对应的具体方法学细节见下文 2.2--2.6 节。
+本研究建立了一套贯穿``单细胞参考构建--空间反卷积--生态位识别--机制解析--跨样本与临床验证"五个阶段的完整转化分析框架（图~\ref{fig:workflow}）。整体流程以 scRNA-seq 参考图谱为起点，经 Cell2location 贝叶斯反卷积将细胞类型丰度映射至 Visium 空间切片的每个 spot；随后基于空间邻域组成的无监督聚类识别免疫抑制生态位，并通过两层次差异表达筛选提炼生态位特征基因签名；在此基础上分别开展配体-受体通讯定量分析（机制层面）、独立切片 CHC20 的跨样本复现验证（空间层面）以及 TCGA-LIHC 大队列的 ssGSEA 投影与多变量 Cox 生存分析（临床层面），三条分析支线相互独立又共同指向同一组生态位特征基因签名。各阶段对应的具体方法学细节见下文 2.2--2.6 节。
 
 \begin{figure}[h] % h:当前位置, t:顶部, b:底部, p:独立一页。LaTeX 会自动选择最合适的位置
     \centering % 使图片居中
@@ -253,7 +238,7 @@ $R_c$ 最小的 cluster 注释为免疫抑制生态位，该多维综合评分�
 的 CP10K+log1p 表达均值定义；
 辅助评分体系（Treg-like score、immune-stroma score 和 niche score）通过对相应组成维度进行 Z-score 标准化后加和计算（详见附录）。
 
-为验证上述邻域参数选择不会主导结论，本研究设计了不依赖硬阈值截断的连续型敏感性分析。分别以 $k$-NN 邻居数 $k \in \{10, 15, 20\}$ 及半径倍增系数 $\text{radius\_multiplier} \in \{1.0, 1.25, 1.5\}$ 两种邻域定义方式对综合 niche 评分（公式~\ref{eq:combined_rank} 所依据的四维 Z-score 加总）进行参数扰动，以主分析参数（$k=15$）下的评分向量作为参考基准，采用 Spearman 秩相关系数 $\rho$ 与连续型加权 Jaccard 相似度 WJ 两个互补指标（公式定义见附录~\ref{app:sensitivity}）联合量化每次扰动后评分分布与参考基准的一致性。两指标联合解读的稳健性判定标准为：$\rho > 0.95$ 且 $\text{WJ} > 0.90$ 判定为结果极稳健；$\rho > 0.90$ 且 $\text{WJ} > 0.80$ 判定为结果稳健、参数选择不敏感；$\rho < 0.85$ 或 $\text{WJ} < 0.70$ 则判定为该参数变化对结果有实质性影响，需要重新审视参数选择~\citep{spearman1904proof}。本研究以 $\rho > 0.90$ 且 $\text{WJ} > 0.80$ 作为参数稳健性的通过标准，在 $k$-NN 和半径两种邻域定义、共计 6 组参数扰动下的评分向量与主分析参考基准逐一比较，用于判断 $k=15$ 的参数选择是否显著影响下游 niche 识别与特征基因提取结果。
+为验证上述邻域参数选择不会主导结论，本研究设计了不依赖硬阈值截断的连续型敏感性分析。分别以 $k$-NN 邻居数 $k \in \{10, 15, 20\}$ 及半径倍增系数 $\text{radius\_multiplier} \in \{1.0, 1.25, 1.5\}$ 两种邻域定义方式对综合 niche 评分（公式~\ref{eq:combined_rank} 所依据的四维 Z-score 加总）进行参数扰动，以主分析参数（$k=15$）下的评分向量作为参考基准，采用 Spearman 秩相关系数 $\rho$ 与连续型加权 Jaccard 相似度 WJ 两个互补指标（公式定义见附录~\ref{app:sensitivity}）联合量化每次扰动后评分分布与参考基准的一致性。两指标联合解读的稳健性判定标准为：$\rho > 0.95$ 且 $\text{WJ} > 0.90$ 判定为结果极稳健；$\rho > 0.90$ 且 $\text{WJ} > 0.80$ 判定为结果稳健、参数选择不敏感；$\rho < 0.85$ 或 $\text{WJ} < 0.70$ 则判定为该参数变化对结果有实质性影响，需要重新审视参数选择。本研究以 $\rho > 0.90$ 且 $\text{WJ} > 0.80$ 作为参数稳健性的通过标准，在 $k$-NN 和半径两种邻域定义、共计 6 组参数扰动下的评分向量与主分析参考基准逐一比较，用于判断 $k=15$ 的参数选择是否显著影响下游 niche 识别与特征基因提取结果。
 
 在完成邻域参数稳健性验证的基础上，本研究进一步以连续型综合 niche 评分（immunosuppressive\_niche\_score）为依据，对每个 spot 附加二值化的高/低生态位标签，作为后续特征基因两层筛选（2.6 节）的分组变量。具体而言，以该评分在全部 spot 中的第 90 百分位为阈值，评分不低于该阈值的 spot 标注为 niche\_high，其余标注为 niche\_low。
 
@@ -306,7 +291,7 @@ FDR 校正后的 $p$ 值，用于独立评估每个先验基因是否体现出 n
 \begin{equation*}
 \text{score}_{LR,i} = \text{rank}(E_{L,i}) \times \text{rank}(E_{R,i}), \quad \text{rank}(\cdot) \in [0,1]
 \end{equation*}
-该秩归一化乘积在保留配体与受体表达相对高低顺序信息的同时，有效规避了稀疏零值对乘积的支配效应，并天然满足配体、受体须同时具有较高表达水平这一逻辑 AND 约束。对每个 L-R 对分别计算其在 niche\_high 和 niche\_low 两组中的秩归一化乘积均值，并以 $\log_2(\text{mean}_{\text{high}}/\text{mean}_{\text{low}})$（分母加入伪计数 $\varepsilon = 10^{-6}$ 以避免除零）量化其在免疫抑制生态位中的富集或耗竭方向，最终以热图（通讯强度）与条形图（$\log_2$FC）联合呈现 12 对通讯轴在两组间的差异模式。
+该秩归一化乘积在保留配体与受体表达相对高低顺序信息的同时，有效规避了稀疏零值对乘积的支配效应，并天然满足配体、受体须同时具有较高表达水平这一逻辑 AND 约束。对每个 L-R 对分别计算其在 niche\_high 和 niche\_low 两组中的秩归一化乘积均值，并以 $\log_2(\text{mean}_{\text{high}}/\text{mean}_{\text{low}})$（分母加入伪计数 $\varepsilon = 10^{-6}$ 以避免除零）量化其在免疫抑制生态位中的富集或耗竭方向。
 
 在细胞间通讯之外，本研究进一步以预定义功能基因集评分的方式，从通路层面系统刻画免疫抑制、基质重塑、炎症与代谢应激等生物学过程在不同空间结构域中的活跃程度（图~\ref{fig:domain_func}）。具体而言，参照 Hallmark 基因集~\citep{liberzon2015molecular} 的构建思路及单样本基因集评分的通用范式~\citep{barbie2009systematic}，人工组织了 TGF-$\beta$ Signaling、EMT、Angiogenesis、IL6-JAK-STAT3、Treg Immune Suppression、TAM Polarization (M2)、CAF Activation、Immune Checkpoint、Hypoxia 及 TNF-$\alpha$ Signaling via NF-$\kappa$B 共 10 条与 Treg--TAM--CAF 免疫抑制轴及其伴随微环境改变密切相关的功能通路基因集，每条通路包含 6 个代表性基因；对每个 spot 计算通路内全部可用基因的 CP10K+log1p 表达均值作为该通路的单样本评分，再按 2.5 节所述规则化空间域标签（tumor\_core / tumor\_edge / stroma\_immune / other）分组求平均，得到每条通路在四个空间域中的平均评分。气泡图中气泡大小表征评分的相对高低，颜色区分该评分是否高于该通路在全部四域中的全局均值（红色为高于均值、蓝色为低于均值）。
 
@@ -379,7 +364,7 @@ log-rank 检验~\citep{mantel1966evaluation} 评估两组生存差异。
 
 图 \ref{fig:he} 将 HCC4R 切片中的空间生态位地图精确映射每个 spot 上。其中的 H\&E 染色图清晰呈现了肿瘤实质区（核大深染、Hepatocyte 密集）与基质/间质区（纤维化、炎症浸润）的形态学边界，为空间转录组结果提供了组织学参照。
 
-从空间结构域地图可见，Tumor Core（红色）呈大片连续分布，构成组织切片的主体骨架，与肿瘤实质在 H\&E 染色和 Hepatocyte 反卷积丰度图中呈现的核密集区域在空间位置上高度吻合；Stroma/Immune（蓝色）则以条带状镶嵌于 Tumor Core 周围及组织边缘，形成环绕/穿插于肿瘤实质之间的连续区域，未表现为孤立的散点分布，这与无监督聚类能够有效捕获组织连续空间微结构、而非随机噪声的方法学预期一致~\citep{schurch2020coordinated}；Tumor Edge（橙色）散布于 Tumor Core 与 Stroma/Immune 的过渡地带，构成两者之间的窄带状界面，在图中占比相对最小。这一空间格局提示，HCC4R 切片的组织结构并非肿瘤与基质截然二分，而是呈现"核心—边缘—基质免疫"的连续过渡梯度，与经典``免疫排斥型"HCC 中肿瘤细胞占据核心、免疫基质细胞被限制在外周边界的空间结构描述相符~\citep{llovet2021hepatocellular,binnewies2018understanding}。
+从空间结构域地图可见，Tumor Core（红色）呈大片连续分布，构成组织切片的主体骨架，与肿瘤实质在 H\&E 染色和 Hepatocyte 反卷积丰度图中呈现的核密集区域在空间位置上高度吻合；Stroma/Immune（蓝色）则以条带状镶嵌于 Tumor Core 周围及组织边缘，形成环绕/穿插于肿瘤实质之间的连续区域，未表现为孤立的散点分布，这与无监督聚类能够有效捕获组织连续空间微结构、而非随机噪声的方法学预期一致~\citep{schurch2020coordinated}；Tumor Edge（橙色）散布于 Tumor Core 与 Stroma/Immune 的过渡地带，构成两者之间的窄带状界面，在图中占比相对最小。这一空间格局提示，HCC4R 切片的组织结构并非肿瘤与基质截然二分，而是呈现``核心—边缘—基质免疫"的连续过渡梯度，与经典``免疫排斥型"HCC 中肿瘤细胞占据核心、免疫基质细胞被限制在外周边界的空间结构描述相符~\citep{llovet2021hepatocellular,binnewies2018understanding}。
 
 \begin{figure}[h]
     \centering
@@ -433,9 +418,9 @@ Fibroblast 则主要分布于围绕肿瘤实质的基质层（图 \ref{fig:spati
     \label{fig:hot_plot}
 \end{figure}
 
-细胞类型间的 Pearson 相关分析（图 \ref{fig:hot_plot}）进一步以定量方式刻画了上述空间共定位关系。相关性热图结果显示，Myeloid 细胞分别与 Treg 细胞（$r = 0.35$）及 Fibroblast（$r = 0.35$）均呈现出中等强度的显著正相关，而 Fibroblast 与 Treg 之间则表现出微弱的负相关（$r = -0.15$）。这一"非对称三角"相关模式提示，免疫基质组分在空间上可能存在精细的功能分层：Myeloid 细胞（TAM）作为核心的空间桥梁同时与免疫抑制细胞和基质细胞发生关联——一方面通过分泌 CCL22、CXCL12 等趋化因子招募并锚定 Treg~\citep{noy2014tumor,curiel2004specific}，另一方面与 Fibroblast（CAF）协同参与细胞外基质重塑与物理屏障构建~\citep{kalluri2016biology}；而 Fibroblast 与 Treg 二者直接的空间关联较弱，与二者更可能通过 TAM 这一共同节点间接耦联、而非直接相互募集的机制假设相符，这与既往研究中 TAM 在肿瘤免疫抑制网络里承担"信号枢纽"角色的观察一致~\citep{biswas2010macrophage}。
+细胞类型间的 Pearson 相关分析（图 \ref{fig:hot_plot}）进一步以定量方式刻画了上述空间共定位关系。相关性热图结果显示，Myeloid 细胞分别与 Treg 细胞（$r = 0.35$）及 Fibroblast（$r = 0.35$）均呈现出中等强度的显著正相关，而 Fibroblast 与 Treg 之间则表现出微弱的负相关（$r = -0.15$）。这一``非对称三角"相关模式提示，免疫基质组分在空间上可能存在精细的功能分层：Myeloid 细胞（TAM）作为核心的空间桥梁同时与免疫抑制细胞和基质细胞发生关联，一方面通过分泌 CCL22、CXCL12 等趋化因子招募并锚定 Treg~\citep{noy2014tumor,curiel2004specific}，另一方面与 Fibroblast（CAF）协同参与细胞外基质重塑与物理屏障构建~\citep{kalluri2016biology}；而 Fibroblast 与 Treg 二者直接的空间关联较弱，与二者更可能通过 TAM 这一共同节点间接耦联、而非直接相互募集的机制假设相符，这与既往研究中 TAM 在肿瘤免疫抑制网络里承担``信号枢纽"角色的观察一致。
 
-此外，上述三类免疫基质组分（Myeloid、Treg、Fibroblast）均与实质细胞 Hepatocyte 表现出强烈的空间负相关（相关系数分别为 $r = -0.73$、$r = -0.62$ 和 $r = -0.55$），提示三者在空间上高度聚集于非肿瘤实质区域而系统性地排斥于肿瘤核心之外。这一定量证据有力支持了免疫抑制生态位主要盘踞于肿瘤-基质过渡带、而非弥散分布于整个切片的空间格局，其阻碍效应性免疫细胞向肿瘤核心有效浸润的拓扑学特征，与经典``免疫排斥型"肿瘤中免疫细胞被物理限制于肿瘤边界及基质区、无法进入肿瘤实质发挥杀伤功能的空间结构描述高度吻合~\citep{llovet2021hepatocellular,chen2017oncology}。
+此外，上述三类免疫基质组分（Myeloid、Treg、Fibroblast）均与实质细胞 Hepatocyte 表现出强烈的空间负相关（相关系数分别为 $r = -0.73$、$r = -0.62$ 和 $r = -0.55$），提示三者在空间上高度聚集于非肿瘤实质区域而系统性地排斥于肿瘤核心之外。这一定量证据有力支持了免疫抑制生态位主要盘踞于肿瘤-基质过渡带、而非弥散分布于整个切片的空间格局，其阻碍效应性免疫细胞向肿瘤核心有效浸润的拓扑学特征，与经典``免疫排斥型"肿瘤中免疫细胞被物理限制于肿瘤边界及基质区、无法进入肿瘤实质发挥杀伤功能的空间结构描述高度吻合~\citep{llovet2021hepatocellular}。
 
 \subsubsection{HCC4R 不同空间结构域差异}
 
@@ -478,9 +463,9 @@ Fibroblast 则主要分布于围绕肿瘤实质的基质层（图 \ref{fig:spati
 
 细胞组成堆叠条形图（图 \ref{fig:cell_type_composition}）为上述空间格局提供了定量支持。其中四个域中 Hepatocyte 比例呈现明确的梯度递减：Tumor Core（约 35\%）> Other（约 24\%）> Tumor Edge（约 25\%）> Stroma/Immune（最低），与``Tumor Core 由肝细胞/恶性细胞主导"的定义相符。与之相对，Treg、Myeloid 和 Fibroblast 三类免疫抑制轴核心细胞的比例均在 Stroma/Immune 和 Tumor Edge 两个域中高于 Tumor Core：Treg 比例在 Stroma/Immune 中达到四组最高水平，Myeloid 和 Fibroblast 亦呈现相似的富集趋势，三者在同一空间域中的协同富集直接印证了正文所述 Treg--TAM--CAF 三角免疫抑制轴的空间协同性~\citep{sakaguchi2020regulatory,noy2014tumor,kalluri2016biology}。T/NK 细胞比例在 Tumor Edge 中相对突出，与肿瘤侵袭前沿是效应 T 细胞与调节性细胞交锋的主战场这一认识相符~\citep{schurch2020coordinated}。Endothelial 比例在四组间相对稳定，提示血管分布本身并非驱动该聚类分区的主导因素。
 
-空间结构域在不同模块得分小提琴图（图 \ref{fig:treg_score} \ref{fig:immune_stroma} \ref{fig:immunosuppressive_niche}）也可以得到类似的结论。对不同空间结构域的定量比较表明，各区域的微环境特征存在显著差异。Kruskal-Wallis 检验结果显示，三种评分在不同区域间的整体分布差异均具有极显著的统计学意义（均 $p < 0.001$）。其中，Stroma/Immune 区域的免疫-基质评分（$\eta^2 = 0.83$）、免疫抑制微环境评分（$\eta^2 = 0.41$）以及 Treg 样细胞评分（$\eta^2 = 0.33$）均显著高于 Tumor Core、Tumor Edge 及 Other 区域（两两比较均 $p < 0.001$）。这种差异在免疫-基质评分中最为突出：非 Stroma/Immune 区域高度集中于低分区间，而 Stroma/Immune 区域则呈现出明显的右尾偏移，广泛分布于高分区间。~\citep{mann1947test}。
+空间结构域在不同模块得分小提琴图（图 \ref{fig:treg_score} \ref{fig:immune_stroma} \ref{fig:immunosuppressive_niche}）也可以得到类似的结论。对不同空间结构域的定量比较表明，各区域的微环境特征存在显著差异。Kruskal-Wallis 检验结果显示，三种评分在不同区域间的整体分布差异均具有极显著的统计学意义（均 $p < 0.001$）。其中，Stroma/Immune 区域的免疫-基质评分（$\eta^2 = 0.83$）、免疫抑制微环境评分（$\eta^2 = 0.41$）以及 Treg 样细胞评分（$\eta^2 = 0.33$）均显著高于 Tumor Core、Tumor Edge 及 Other 区域（两两比较均 $p < 0.001$）。这种差异在免疫-基质评分中最为突出：非 Stroma/Immune 区域高度集中于低分区间，而 Stroma/Immune 区域则呈现出明显的右尾偏移，广泛分布于高分区间~\citep{mann1947test}。
 
-综合细胞组成与功能评分两方面的定量结果，HCC4R 切片呈现出"Tumor Core 低、Tumor Edge 居中、Stroma/Immune 高"的单调免疫抑制梯度，且该规则化分域方案在效应量与显著性上均获统计学支持，为下一节数据驱动的 Cellular Neighborhoods 聚类提供了先验预期。
+综合细胞组成与功能评分两方面的定量结果，HCC4R 切片呈现出``Tumor Core 低、Tumor Edge 居中、Stroma/Immune 高"的单调免疫抑制梯度，且该规则化分域方案在效应量与显著性上均获统计学支持，为下一节数据驱动的 Cellular Neighborhoods 聚类提供了先验预期。
 
 \subsection{Cellular Neighborhoods 聚类识别免疫抑制空间生态位}
 
@@ -495,7 +480,7 @@ Fibroblast 则主要分布于围绕肿瘤实质的基质层（图 \ref{fig:spati
 
 图中最突出的 Immunosuppressive Niche 是在空间上面积最大、连通性最强的单一聚类区域，占据切片中心地带并向多个方向延伸，与其余 11 个聚类相比在空间连续性和覆盖范围上均具有明显优势。该聚类被正文方法学流程通过综合排名公式（公式 \ref{eq:combined_rank}）判定为 immunosuppressive\_niche ，即在 Treg 比例、Myeloid 比例、Fibroblast 比例和免疫抑制基因评分四个维度的降序排名之和最小，因此在四维证据的联合权衡下被判定为综合免疫抑制特征最强的邻域类型。Immunosuppressive Niche 在空间上包含于图 \ref{fig:he}  Stroma/Immune 和 Tumor Edge 区域中，两种独立标注方式（Leiden 聚类原始编号 vs. 规则化语义标签）在空间位置上的相互印证，从方法学角度增强了该免疫抑制生态位判定结果的稳健性，也与聚类图与语义标注图应呈现高度空间一致性的预期相符~\citep{schurch2020coordinated,goltsev2018deep}。
 
-图中同时清晰呈现的一个特征是，除 NC-2 外，其余聚类呈现出明显的组织学分区意义：例如 NC-1 和 NC-3 分别在切片左下与右上角形成两个独立的大面积连续区域，很可能对应不同批次或不同区域的肿瘤实质亚型；NC-5、NC-9等则以较窄条带形式镶嵌于 NC-1、NC-2 等大聚类之间，提示这些邻域代表了肿瘤与基质之间的过渡带亚结构。整体而言，Leiden 算法在未设定聚类数目先验的情况下自动识别出 12 个具有内部一致性、且在空间上连续分布的邻域类型，这一结果验证了无监督聚类方法确实能够捕获真实存在的组织空间微结构而非人为设定的伪影~\citep{traag2019leiden,schurch2020coordinated}。这种``一个显著免疫抑制邻域 + 多个肿瘤/基质亚结构邻域"并存的格局，也与近年空间蛋白质组学研究中发现的肿瘤组织普遍存在多种细胞邻域共存、且免疫抑制性邻域通常表现为跨越肿瘤-基质界面的连续结构而非孤立热点这一观察一致~\citep{jackson2020single,bhate2022tissue}，进一步支持了本研究识别出的免疫抑制生态位是 HCC4R 切片中一种具有稳定组织学基础的真实空间实体，而非聚类参数任意选择下的偶然产物。
+图中同时清晰呈现的一个特征是，除红色标注出的 Immunosuppressive niche 外，其余聚类呈现出明显的组织学分区意义：例如 NC-1 和 NC-3 分别在切片左下与右上角形成两个独立的大面积连续区域，很可能对应不同批次或不同区域的肿瘤实质亚型；NC-5、NC-9等则以较窄条带形式镶嵌于 NC-1、Immunosuppressive Niche 等大聚类之间，提示这些邻域代表了肿瘤与基质之间的过渡带亚结构。整体而言，Leiden 算法在未设定聚类数目先验的情况下自动识别出 12 个具有内部一致性、且在空间上连续分布的邻域类型，这一结果验证了无监督聚类方法确实能够捕获真实存在的组织空间微结构而非人为设定的伪影~\citep{traag2019leiden,schurch2020coordinated}。这种``一个显著免疫抑制邻域 + 多个肿瘤/基质亚结构邻域"并存的格局，也与近年空间蛋白质组学研究中发现的肿瘤组织普遍存在多种细胞邻域共存、且免疫抑制性邻域通常表现为跨越肿瘤-基质界面的连续结构而非孤立热点这一观察一致~\citep{jackson2020single,bhate2022tissue}，进一步支持了本研究识别出的免疫抑制生态位是 HCC4R 切片中一种具有稳定组织学基础的真实空间实体，而非聚类参数任意选择下的偶然产物。
 
 \subsection{niche 特征基因签名的提取与功能注释}
 
@@ -622,13 +607,13 @@ log-rank 检验未达到统计学显著性（$p = 0.79$），提示该空间签�
 
 \section{讨论}
 
-本研究建立了一套贯穿"单细胞参考构建--空间反卷积--生态位识别--机制解析--跨样本与临床验证"五个阶段的完整分析框架，实现了从单细胞转录组参考图谱提取空间免疫调控规律、并在独立组织与患者队列中进行系统性验证的研究目标。与传统以先验标记基因集定义肿瘤免疫抑制状态的分析范式相比，本方案具有三个主要创新点：第一，采用无监督的 Cellular Neighborhoods 聚类策略直接从数据本身发现免疫抑制空间结构，而非依赖于预先设定的细胞类型权重或阈值；第二，针对 Visium 平台固有的细胞稀释效应，引入检出率差值 $\Delta$fraction 作为传统 $\log_2$FC 筛选的补偿维度，有效降低了因稀疏表达导致的假阴性风险，使得 Treg 相关标志基因的特征提取更为敏感；第三，以规则化空间域标签体系作为独立的语义参照系，与数据驱动的 Leiden 聚类结果形成方法学层面的交叉印证，显著增强了免疫抑制生态位判定的稳健性与可解释性。该整合策略为单细胞分辨率参考图谱与空间转录组数据的有机结合提供了可重复的方法学范式，其"发现--机制--验证"闭环设计对其他实体瘤的微环境空间分型研究亦有借鉴意义。
+本研究建立了一套贯穿``单细胞参考构建--空间反卷积--生态位识别--机制解析--跨样本与临床验证"五个阶段的完整分析框架，实现了从单细胞转录组参考图谱提取空间免疫调控规律、并在独立组织与患者队列中进行系统性验证的研究目标。与依赖先验基因集的传统范式相比，本方案创新采用无监督 Cellular Neighborhoods 聚类，直接从数据底层解析免疫抑制空间结构。为克服 Visium 平台的细胞稀释效应，引入检出率差值 $\Delta$fraction 补偿 $\log_2$FC 筛选，有效降低假阴性并提升 Treg 特征提取灵敏度。同时，利用规则化空间域标签与 Leiden 聚类交叉印证，显著增强了免疫生态位判定的稳健性与可解释性。该整合策略为单细胞分辨率参考图谱与空间转录组数据的有机结合提供了可重复的方法学范式，其``发现--机制--验证"闭环设计对其他实体瘤的微环境空间分型研究亦有借鉴意义。
 
-尽管在组织学层面与跨空间切片验证中均获得了高度一致的结果，本研究的 TCGA-LIHC 独立预后验证环节与预期不符：Kaplan-Meier 生存分析（$p = 0.79$）与多变量 Cox 回归（$\text{HR} = 0.92$，$p = 0.862$）均未达到统计学显著性，森林图与 KM 曲线均未能从本空间签名中提取出具有独立预后意义的风险分层信号。这一矛盾可能归因于多个方面的方法学局限。其一，ssGSEA 投影至 bulk 转录组的过程可能会严重稀释空间特异性的信号，bulk RNA-seq 将整张组织匀浆后测量平均表达水平，丢失了空间定位信息，使得真正起驱动作用的局部高信号区域（如 Treg 富集的侵袭前沿或纤维化间质）可能被大面积的正常肝实质或肿瘤实质信号所掩盖~\citep{svensson2018spatiallyvariable,gao2020loss}。其二，TCGA-LIHC 队列中的肿瘤组织往往伴有不同程度的坏死、炎症与基质成分比例患者间差异极大，而 bulk 水平的免疫微环境组成受取样位置影响显著~\citep{zhang2019landscape}；即使同一例患者在影像引导下取两个不同位置的标本，其肿瘤内免疫细胞比例也可能有很大差异，这一取样偏差可能掩盖 bulk ssGSEA 评分与真实总体生存之间的弱效应信号。其三，从空间转录组特征到总体生存的因果链路上存在多个中间环节，免疫抑制生态位可能是肿瘤切除后短期内复发或治疗抵抗的局部驱动因子，但未必能对总体生存造成显著影响~\citep{zhang2019landscape}。另外，TCGA-LIHC 队列的临床资料多源于不同纳入中心，手术质量、辅助治疗方案及随访完整度存在系统异质性，进一步引入了非生物学层面的随机噪声~\citep{liu2018tcga}。综上，空间 niche signature 虽能精准刻画且高度可复现免疫空间结构，但从其到 bulk OS 预后因子的临床转化可能需要更精细的终点指标（如无复发生存期 RFS）或更均衡的前瞻性样本采集策略~\citep{liu2018tcga}。
+尽管在组织学层面与跨空间切片验证中均获得了高度一致的结果，本研究的 TCGA-LIHC 独立预后验证环节与预期不符：Kaplan-Meier 生存分析（$p = 0.79$）与多变量 Cox 回归（$\text{HR} = 0.92$，$p = 0.862$）均未达到统计学显著性，森林图与 KM 曲线均未能从本空间签名中提取出具有独立预后意义的风险分层信号。这一矛盾可能归因于多个方面的方法学局限。首先，将 ssGSEA 投影至 bulk 转录组会因组织匀浆丢失空间定位，导致驱动免疫抑制的局部高信号（如 Treg 富集区）被大面积正常或肿瘤实质信号掩盖~\citep{svensson2018spatiallyvariable,gao2020loss}。同时，TCGA-LIHC 样本成分异质性极高，bulk 测序极易受取样位置偏差影响，从而掩盖真实的生存关联信号~\citep{zhang2019landscape}。此外，局部生态位往往仅驱动短期复发或耐药，距离总体生存的因果链较长~\citep{zhang2019landscape}，加之多中心队列在治疗和随访方案上的系统性差异引入了非生物学噪声，进一步干扰了预后评估的显著性~\citep{liu2018tcga}。综上，空间 niche signature 虽能精准刻画且高度可复现免疫空间结构，但从其到 bulk OS 预后因子的临床转化可能需要更精细的终点指标（如无复发生存期 RFS）或更均衡的前瞻性样本采集策略~\citep{liu2018tcga}。
 
-除生存分析不显著之外，本章研究在方法学层面还存在以下若干有待改进之处：第一，Immunosuppressive niche score 中度量依赖邻域参数 $k$ 与半径倍数的选择，虽已通过敏感性分析证明结果的总体稳健性（$\rho > 0.90$, $\text{WJ} > 0.80$），但其对极端参数变化的局部空间边界影响仍不可完全忽视，未来研究可考虑利用贝叶斯层次模型同时对后验空间模式与邻域概率分布进行概率推断，降低对单一固定邻域定义的依赖~\citep{kleshchevnikov2022cell2location,gelman2013bayesian}；第二，配体-受体通讯分析虽然引入了秩归一化方法规避了原始乘积法的零值膨胀缺陷，但未能完全区分真正双向通讯与配体--受体基因在同一 shout--spot 内因不同细胞类型各自表达而产生的高共表达假象~\citep{cang2023commot}，可能需要结合配体--受体基因共定位概率模型加以解决；第三，免疫抑制基因模块仅依据侧上调进行筛选，未能顾及抑制性分子下调（如 HLA 基因丢失）等免疫逃逸机制~\citep{montesion2021hla}；第四，现有分析仅纳入了一个 HCC 切片 HCC4R 和一个混合型肝细胞--胆管癌 CHC20 进行跨样本验证，样本量仍显不足，未来工作应扩展至多中心的多癌种空间转录组队列。
+除生存分析不显著之外，本章研究在方法学层面还存在以下若干有待改进之处。比如，Immunosuppressive niche score 中度量依赖邻域参数 $k$ 与半径倍数的选择，虽已通过敏感性分析证明结果的总体稳健性（$\rho > 0.90$, $\text{WJ} > 0.80$），但其对极端参数变化的局部空间边界影响仍不可完全忽视，未来研究可考虑利用贝叶斯层次模型同时对后验空间模式与邻域概率分布进行概率推断，降低对单一固定邻域定义的依赖~\citep{kleshchevnikov2022cell2location}。2.6 节中的配体-受体通讯分析虽然引入了秩归一化方法规避了原始乘积法的零值膨胀缺陷，但未能完全区分真正双向通讯与配体--受体基因在同一 shout--spot 内因不同细胞类型各自表达而产生的高共表达假象，可能需要结合配体--受体基因共定位概率模型加以解决。免疫抑制基因模块仅依据侧上调进行筛选，未能顾及抑制性分子下调（如 HLA 基因丢失）等免疫逃逸机制~\citep{montesion2021hla}。另外，现有分析仅纳入了一个 HCC 切片 HCC4R 和一个混合型肝细胞--胆管癌 CHC20 进行跨样本验证，样本量仍显不足，未来工作应扩展至多中心的多癌种空间转录组队列。
 
-展望未来，本研究所建立的分析框架可在以下三个方向加以拓展。第一，通过与多重免疫荧光（mIF）或 MIBI/CODEX 等空间蛋白质组学数据的配准融合，可在蛋白验证层面进一步确认免疫抑制生态位中关键分子（CXCL12--CXCR4 轴、PD-1/PD-L1 免疫检查点）的空间共定位关系，为免疫检查点阻断（ICB）治疗的个体化疗效预测提供分子标志物~\citep{keren2018structured,zhu2021spark}。第二，随着 10x Visium HD 以及 Slide-seq、Stereo-seq 等更高分辨率空间测序技术的日趋成熟，未来可在接近单细胞甚至亚细胞精度上重新评估本研究的结构域定义方案及特征基因签名是否适用于亚 spot 的精细微环境区隔，进一步探索肿瘤--免疫交界面的精细拓扑结构~\citep{moses2022museum,chen2022spatia}。第三，可将"空间生态位 signature"作为输入特征训练 Transformer 等深度学习模型用于手术切缘患者复发风险的无标记预测，或结合数字病理学将宏观 H\&E 图像特征与微观空间转录组 signal 进行多模态整合，构建"宏观--微观"跨尺度的肿瘤免疫状态评估体系~\citep{chen2016liver,shmatko2022artific}。本研究积累的数据处理流程、特征筛选准则以及敏感分析框架可为上述拓展方向提供基础性的方法学参照。
+展望未来，本研究所建立的分析框架可在以下几个方向加以拓展和应用。首先，通过与多重免疫荧光（mIF）或 MIBI/CODEX 等空间蛋白质组学数据的配准融合，可在蛋白验证层面进一步确认免疫抑制生态位中关键分子（CXCL12--CXCR4 轴、PD-1/PD-L1 免疫检查点）的空间共定位关系，为免疫检查点阻断（ICB）治疗的个体化疗效预测提供分子标志物~\citep{keren2018structured,zhu2021spark}。随着 10x Visium HD 以及 Slide-seq、Stereo-seq 等更高分辨率空间测序技术的日趋成熟，未来可在接近单细胞甚至亚细胞精度上重新评估本研究的结构域定义方案及特征基因签名是否适用于亚 spot 的精细微环境区隔，进一步探索肿瘤--免疫交界面的精细拓扑结构~\citep{moses2022museum,chen2022spatia}。另外，也可将``空间生态位 signature"作为输入特征训练 Transformer 等深度学习模型用于手术切缘患者复发风险的无标记预测，或结合数字病理学将宏观 H\&E 图像特征与微观空间转录组 signal 进行多模态整合，构建宏观--微观跨尺度的肿瘤免疫状态评估体系~\citep{chen2016liver,shmatko2022artific}。本研究积累的数据处理流程、特征筛选准则以及敏感分析框架可为上述拓展方向提供基础性的方法学参照。
 
 % ============================================================
 %  第五部分（附录）：代码实现细节
@@ -649,18 +634,18 @@ log-rank 检验未达到统计学显著性（$p = 0.79$），提示该空间签�
 \toprule
 \textbf{配体} & \textbf{受体} & \textbf{通讯对} & \textbf{生物学意义} \\
 \midrule
-CXCL12 & CXCR4   & CXCL12--CXCR4  & CAF 分泌，招募 Treg/MDSC~\citep{domanska2013targeting} \\
-TGFB1  & TGFBR1  & TGFB1--TGFBR1  & 免疫抑制细胞因子，CAF+Treg 共分泌~\citep{mariathasan2018tgfb} \\
-PDCD1  & CD274   & PD-1--PD-L1    & 经典免疫检查点轴~\citep{sharma2023immunosuppressive} \\
-TIGIT  & NECTIN2 & TIGIT--NECTIN2 & Treg 抑制性检查点~\citep{sakaguchi2020regulatory} \\
-LAG3   & HLA-DRA & LAG3--MHC-II   & T 细胞耗竭相关~\citep{sharma2023immunosuppressive} \\
-CCL22  & CCR4    & CCL22--CCR4    & TAM 招募 Treg~\citep{curiel2004specific} \\
-IL10   & IL10RA  & IL10--IL10RA   & Treg 免疫抑制细胞因子轴~\citep{noy2014tumor} \\
-SPP1   & CD44    & SPP1--CD44     & TAM 分泌骨桥蛋白~\citep{biswas2010macrophage} \\
-MIF    & CD74    & MIF--CD74      & 巨噬细胞迁移抑制因子~\citep{noy2014tumor} \\
-VEGFA  & KDR     & VEGFA--KDR     & 血管生成，CAF 相关~\citep{kalluri2016biology} \\
-LGALS9 & HAVCR2  & Galectin9--TIM-3 & 抑制性检查点~\citep{sharma2023immunosuppressive} \\
-CCL2   & CCR2    & CCL2--CCR2     & 巨噬细胞招募通路~\citep{biswas2010macrophage} \\
+CXCL12 & CXCR4   & CXCL12--CXCR4  & CAF 分泌，招募 Treg/MDSC \\
+TGFB1  & TGFBR1  & TGFB1--TGFBR1  & 免疫抑制细胞因子，CAF+Treg 共分泌 \\
+PDCD1  & CD274   & PD-1--PD-L1    & 经典免疫检查点轴 \\
+TIGIT  & NECTIN2 & TIGIT--NECTIN2 & Treg 抑制性检查点 \\
+LAG3   & HLA-DRA & LAG3--MHC-II   & T 细胞耗竭相关 \\
+CCL22  & CCR4    & CCL22--CCR4    & TAM 招募 Treg \\
+IL10   & IL10RA  & IL10--IL10RA   & Treg 免疫抑制细胞因子轴 \\
+SPP1   & CD44    & SPP1--CD44     & TAM 分泌骨桥蛋白 \\
+MIF    & CD74    & MIF--CD74      & 巨噬细胞迁移抑制因子 \\
+VEGFA  & KDR     & VEGFA--KDR     & 血管生成，CAF 相关 \\
+LGALS9 & HAVCR2  & Galectin9--TIM-3 & 抑制性检查点 \\
+CCL2   & CCR2    & CCL2--CCR2     & 巨噬细胞招募通路 \\
 \bottomrule
 \end{tabularx}
 \end{table}
@@ -677,7 +662,7 @@ CCL2   & CCR2    & CCL2--CCR2     & 巨噬细胞招募通路~\citep{biswas2010ma
 \end{equation}
 其中 $d_i$ 为参考评分与扰动后评分在第 $i$ 个 spot 上的秩次之差，$n$ 为 spot 总数。$\rho$ 直接度量全部 spot 相对排序的一致性，不受任何截断阈值影响，取值范围为 $[-1, 1]$，越接近 1 表示参数扰动对 spot 排序几乎没有影响。
 
-指标二为连续型加权 Jaccard 相似度（Weighted Jaccard），定义为
+指标二为连续型加权 Jaccard 相似度，定义为
 \begin{equation}
 \text{WJ}(\mathbf{a}, \mathbf{b}) = \frac{\sum_i \min(a_i, b_i)}{\sum_i \max(a_i, b_i)}
 \label{eq:weighted_jaccard}
